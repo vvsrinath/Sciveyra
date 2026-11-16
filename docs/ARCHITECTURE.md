@@ -1,0 +1,92 @@
+# Architecture
+
+SciVeyra is a client-only React single-page application. There is no server component: parsing, plotting, image processing, bibliography formatting, storage and export all run in the browser.
+
+## Layers
+
+```text
+main.tsx
+  └─ BrowserRouter
+       └─ AppProvider          global toasts + refresh counter
+            └─ App.tsx         lazy route table
+                 └─ Shell       sidebar, header, local-storage status
+                      └─ feature page
+                           ├─ components/ui.tsx      shared primitives
+                           ├─ components/PlotlyChart lazy Plotly wrapper
+                           ├─ lib/*.js               framework-free domain logic
+                           └─ lib/storage.js         IndexedDB access
+```
+
+Rules of thumb:
+
+- **`src/app`** owns cross-page concerns: routing, the shell and React context.
+- **`src/features/<studio>`** owns screens and studio-local components. A feature may import from `components/` and `lib/`, never from another feature.
+- **`src/lib`** must remain framework-free. Functions are plain JavaScript with JSDoc types so they can be tested without a DOM.
+- **`src/components`** holds only genuinely shared UI. Plotly is loaded lazily by `PlotlyChart`.
+- **`src/types.ts`** is the single source of truth for persisted and shared shapes.
+
+## Routing
+
+`src/app/App.tsx` lazily imports each studio:
+
+| Route | Feature folder |
+| --- | --- |
+| `/` | `features/landing` |
+| `/home` | `features/home` |
+| `/graphs` | `features/graph-studio` |
+| `/three-d` | `features/three-d-studio` |
+| `/images` | `features/image-studio` |
+| `/vector` | `features/vector-studio` |
+| `/figures` | `features/figure-composer` |
+| `/diagrams` | `features/diagram-studio` |
+| `/navigator` | `features/research/ResearchNavigator` |
+| `/references` | `features/research/ReferenceManager` |
+| `/writing` | `features/writing-lab` |
+| `/projects` | `features/projects` |
+| `/settings` | `features/settings` |
+
+Unknown paths redirect to `/home`. Netlify rewrites all paths to `index.html` so deep links work in production.
+
+## State and storage
+
+- `AppProvider` (`src/app/AppContext.tsx`) exposes `notify`, `markSaved`, the toast stack and a `refreshKey` counter used to refresh aggregate views.
+- Each studio loads its own records on mount with `dbGetAll`.
+- IndexedDB is accessed through `idb` in `src/lib/storage.js`. The database is `sciveyra`, schema version `1`.
+- Stores: `datasets`, `graphs`, `figures`, `diagrams`, `drafts`, `references`, `assets`, `projects`, `settings`, `meta`.
+- `dbPut` adds `updatedAt`/`createdAt` when missing. `exportBackup` and `importBackup` move the whole database as JSON.
+- Graph records carry an optional `mode` of `'2d' | '3d'`. Graph Studio filters to `mode !== '3d'`; 3D Studio filters to `mode === '3d'`, so the two studios never show each other's saved scenes.
+- Older records without `mode` are treated as 2D.
+
+## Plotting pipeline
+
+1. A dataset is imported and normalised by `src/lib/parse.js`.
+2. A `GraphConfig` is created with `defaultConfig(dataset)` and sanitised by `normalizeConfig`.
+3. `validateConfig(dataset, config)` returns human-readable errors and warnings.
+4. `buildPlotlyFigure(dataset, config, options)` returns `{ data, layout }`.
+5. `<PlotlyChart>` lazy-loads `plotly.js-dist-min` and calls `Plotly.react` whenever data or layout identity changes.
+6. Export goes through `src/lib/export.js` (`Plotly.toImage` for charts, `html2canvas`/`jsPDF` for composites).
+
+`buildPlotlyFigure` is pure and synchronous. Keeping it independent of React is what makes the full plot matrix testable in `tests/graphFeatures.test.js`.
+
+See [`GRAPHING.md`](GRAPHING.md) for plot-by-plot details.
+
+## Adding a feature
+
+1. Create `src/features/<name>/<Name>.tsx`.
+2. Add a lazy import and a route in `src/app/App.tsx`.
+3. Add navigation in `src/app/Shell.tsx` and, if appropriate, the Home dashboard.
+4. Put reusable calculations in `src/lib/` and unit-test them.
+5. Persist new record types by extending `STORES`, `src/types.ts` and the backup flow together.
+6. Run `npm run typecheck && npm test && npm run build`.
+
+Never import one feature from another. If two features need the same behaviour, move it to `src/lib` or `src/components`.
+
+## Conventions
+
+- TypeScript for React and shared contracts; plain JavaScript + JSDoc for `src/lib`.
+- Function components and hooks only.
+- Tailwind utility classes; design tokens in `tailwind.config.js`.
+- Light theme only. Do not add `dark:` variants or toggle a `dark` class.
+- Every numeric option should be finite by the time it reaches Plotly; sanitise in `normalizeConfig`.
+- Synthetic data must keep `source: 'sample'` and a warning that it is not experimental.
+- Do not add paid or hosted AI APIs. Network calls are limited to public scholarly metadata.
