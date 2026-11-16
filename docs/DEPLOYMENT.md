@@ -5,12 +5,12 @@ SciVeyra is a static SPA. The production artefact is the `dist/` directory produ
 ## Build locally
 
 ```bash
-npm ci --legacy-peer-deps
+npm ci
 npm run build
 npm run preview   # serves dist/ at http://127.0.0.1:4173/
 ```
 
-The build runs `tsc -b` first, so type errors fail the build.
+`.npmrc` sets `legacy-peer-deps=true`, so both local and Netlify installs resolve the current peer ranges. The build runs `tsc -b` first, so type errors fail the build.
 
 ## Netlify
 
@@ -23,12 +23,15 @@ The build runs `tsc -b` first, so type errors fail the build.
 
 [build.environment]
   NODE_VERSION = "20"
+  NPM_FLAGS = "--legacy-peer-deps"
 
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
 ```
+
+`.npmrc` also sets `legacy-peer-deps=true`, so the install works whether Netlify uses `npm install` or `npm ci`.
 
 Steps:
 
@@ -44,6 +47,18 @@ Steps:
 ```
 
 Deep links such as `/graphs` and `/three-d` therefore work on refresh.
+
+## Validate the Netlify build locally
+
+The configuration can be exercised without a Netlify account:
+
+```bash
+npx netlify-cli@latest build --offline
+```
+
+This reads `netlify.toml`, runs `npm run build` in the production context and writes `dist/`. The generated `.netlify/` state folder is ignored by git.
+
+A plain static file server is not enough to verify this app: deep links must fall back to `index.html`. If you test manually, use a SPA-aware server or Netlify Dev so `/graphs`, `/three-d`, `/figures` and the other routes resolve on refresh.
 
 ## Other static hosts
 

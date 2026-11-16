@@ -29,7 +29,7 @@ Design tokens live in `tailwind.config.js`; shared primitives live in `src/compo
 Requirements: Node.js 20 or newer (`.nvmrc` is provided).
 
 ```bash
-npm install --legacy-peer-deps
+npm install
 npm run dev
 ```
 
@@ -42,7 +42,7 @@ npm run build
 npm run preview
 ```
 
-`--legacy-peer-deps` is currently required because the PDF/test tool-chain declares peer ranges that npm 7+ resolves strictly. CI uses the same flag.
+`.npmrc` sets `legacy-peer-deps=true`, so plain `npm install` and `npm ci` both work locally and on Netlify. This is required by the current PDF/test tool-chain peer ranges.
 
 ## Scripts
 

@@ -9,13 +9,13 @@ Requirements: Node.js 20+ and npm.
 ```bash
 git clone <repository-url>
 cd sciveyra-frontend
-npm install --legacy-peer-deps
+npm install
 npm run dev
 ```
 
 The app runs at `http://127.0.0.1:5173/`.
 
-`--legacy-peer-deps` is required by the current dependency graph. CI uses the same flag, so local and CI installs match.
+`.npmrc` sets `legacy-peer-deps=true`, so the same plain install works locally, in CI and on Netlify. CI uses `npm ci` for a clean lockfile install.
 
 ## Before you open a pull request
 
