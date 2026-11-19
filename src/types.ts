@@ -182,10 +182,22 @@ export type DiagramRecord = {
   updatedAt: string
 }
 
+export type ClaimRecord = {
+  id: string
+  text: string
+  start: number
+  end: number
+  section: string
+  referenceIds: string[]
+  createdAt?: string
+}
+
 export type DraftRecord = {
   id: string
   title: string
   content: string
+  template?: string
+  claims?: ClaimRecord[]
   createdAt: string
   updatedAt: string
 }

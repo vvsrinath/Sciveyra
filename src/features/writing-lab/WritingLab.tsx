@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowDownToLine, BookOpen, Check, Copy, FileText, Plus, Redo2, Save, ShieldCheck,
-  Sparkles, Trash2, TriangleAlert, Undo2, WandSparkles, X
+  ArrowDownToLine, BookOpen, Check, Copy, FileText, Link2, List, Map, Plus, Redo2,
+  Save, ShieldCheck, Sparkles, Trash2, TriangleAlert, Undo2, WandSparkles, X
 } from 'lucide-react'
 import { Badge, Button, Callout, Card, Field, Input, PageHeader, ProgressBar, Select, Spinner } from '../../components/ui'
 import { useApp } from '../../app/AppContext'
@@ -12,12 +12,16 @@ import { inlineCitation, formatCitation, CITATION_STYLES } from '../../lib/refer
 import { copyText, downloadText } from '../../lib/export.js'
 import { nowIso, uid } from '../../lib/util.js'
 import { canRedo, canUndo, emptyEditStack, initialEditStack, pushEdit, redoStack, undoStack } from '../../lib/history.js'
+import {
+  DRAFT_TEMPLATES, buildTemplateContent, claimStatus, evidenceMapMarkdown, getTemplate,
+  makeClaim, parseSections, referenceLabel, sectionAt, sectionGuidance, summarizeClaims
+} from '../../lib/drafting.js'
 import { applyRewriteDecisions, buildRewriteDiff, summarizeRewriteDiff } from '../../lib/rewriteDiff.js'
 import {
   analyzeParagraph, DEFAULT_OLLAMA_ENDPOINT, DEFAULT_OLLAMA_MODEL, normalizeEndpoint,
   REWRITE_PRESETS, rewriteParagraph, rewriteWithOllama, summarizeChanges
 } from '../../lib/rewriter.js'
-import type { DraftRecord, Reference } from '../../types'
+import type { ClaimRecord, DraftRecord, Reference } from '../../types'
 
 type RewriteEngine = 'local' | 'ollama'
 type SelectionSpan = { start: number; end: number; text: string }
@@ -44,6 +48,7 @@ export default function WritingLab() {
   const [loading, setLoading] = useState(true)
   const [editStack, setEditStack] = useState<EditStack>(emptyEditStack())
   const [target, setTarget] = useState('1000')
+  const [templateId, setTemplateId] = useState(DRAFT_TEMPLATES[0].id)
   const [citationId, setCitationId] = useState('')
   const [citationStyle, setCitationStyle] = useState('APA 7')
   const [selection, setSelection] = useState<SelectionSpan | null>(null)
@@ -53,11 +58,19 @@ export default function WritingLab() {
   const [model, setModel] = useState(DEFAULT_OLLAMA_MODEL)
   const [suggestion, setSuggestion] = useState<RewriteSuggestion | null>(null)
   const [decisions, setDecisions] = useState<Record<string, boolean>>({})
+  const [claimChoice, setClaimChoice] = useState<Record<string, string>>({})
   const [rewriteBusy, setRewriteBusy] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const activeRef = useRef<DraftRecord | null>(null)
   const rewriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   activeRef.current = active
+
+  const claims = useMemo<ClaimRecord[]>(() => active?.claims || [], [active?.claims])
+  const sections = useMemo(() => parseSections(active?.content || ''), [active?.content])
+  const claimSummary = useMemo(
+    () => summarizeClaims(claims, active?.content || '', references),
+    [claims, active?.content, references]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -92,6 +105,8 @@ export default function WritingLab() {
     setSelection(null)
     setSuggestion(null)
     setDecisions({})
+    setClaimChoice({})
+    setTemplateId(active?.template || DRAFT_TEMPLATES[0].id)
     // Re-seed only when switching drafts; edits keep their own stack.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id])
@@ -154,8 +169,10 @@ export default function WritingLab() {
   const applySnapshot = (snapshot: DraftRecord | null) => {
     if (!snapshot) return
     setActive({ ...snapshot, updatedAt: nowIso() })
+    setTemplateId(snapshot.template || DRAFT_TEMPLATES[0].id)
     setSuggestion(null)
     setDecisions({})
+    setClaimChoice({})
   }
 
   const undo = () => {
@@ -273,6 +290,95 @@ export default function WritingLab() {
     return span
   }
 
+  const applyTemplate = () => {
+    if (!active) return
+    if (active.content.trim() && !window.confirm('Replace the current draft content with this outline? Existing text and claim links will be removed; the previous state stays in Version history.')) return
+    applyEdit('template', { template: templateId, content: buildTemplateContent(templateId, active.title), claims: [] })
+    setSelection(null)
+    setSuggestion(null)
+    setDecisions({})
+    setClaimChoice({})
+    notify(`${getTemplate(templateId)?.label || 'Outline'} applied. Section prompts appear in the Outline panel.`, 'success')
+    setTimeout(() => { textareaRef.current?.focus(); textareaRef.current?.setSelectionRange(0, 0) }, 0)
+  }
+
+  const jumpToSection = (position: number) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.focus()
+    textarea.setSelectionRange(position, position)
+    const ratio = position / Math.max(1, active?.content.length || 1)
+    textarea.scrollTop = Math.max(0, ratio * textarea.scrollHeight - 24)
+  }
+
+  const addClaim = () => {
+    if (!active) return
+    const span = captureSelection() || (selection?.text ? selection : null)
+    if (!span || !span.text.trim()) { notify('Select a sentence in the draft first, then add it as a claim.', 'warning'); return }
+    const text = span.text.trim()
+    if (claims.some((claim) => claim.text.trim() === text)) { notify('This claim is already tracked.', 'info'); return }
+    const offset = Math.max(0, span.text.indexOf(text))
+    const start = span.start + offset
+    const claim = makeClaim({
+      id: uid('claim'),
+      text,
+      start,
+      end: start + text.length,
+      section: sectionAt(sections, start)?.title || '',
+      referenceIds: [],
+      createdAt: nowIso()
+    })
+    applyEdit('claims', { claims: [...claims, claim] })
+    notify(references.length ? 'Claim added. Link at least one saved reference as evidence.' : 'Claim added. Save references first, then link evidence.', 'info')
+  }
+
+  const linkReference = (claimId: string) => {
+    if (!active) return
+    const referenceId = claimChoice[claimId]
+    if (!referenceId) return
+    const target = claims.find((claim) => claim.id === claimId)
+    if (!target) return
+    if (target.referenceIds.includes(referenceId)) { notify('That reference is already linked to this claim.', 'info'); return }
+    applyEdit('claims', {
+      claims: claims.map((claim) => claim.id === claimId
+        ? { ...claim, referenceIds: [...claim.referenceIds, referenceId] }
+        : claim)
+    })
+    setClaimChoice((current) => ({ ...current, [claimId]: '' }))
+    notify('Reference linked as evidence for this claim.', 'success')
+  }
+
+  const unlinkReference = (claimId: string, referenceId: string) => {
+    if (!active) return
+    applyEdit('claims', {
+      claims: claims.map((claim) => claim.id === claimId
+        ? { ...claim, referenceIds: claim.referenceIds.filter((id) => id !== referenceId) }
+        : claim)
+    })
+  }
+
+  const removeClaim = (claimId: string) => {
+    if (!active) return
+    applyEdit('claims', { claims: claims.filter((claim) => claim.id !== claimId) })
+    setClaimChoice((current) => {
+      const next = { ...current }
+      delete next[claimId]
+      return next
+    })
+    notify('Claim removed from the evidence map.', 'info')
+  }
+
+  const exportEvidenceMap = () => {
+    if (!active) return
+    const base = (active.title || 'draft').replace(/[^a-z0-9]+/gi, '-').toLowerCase()
+    downloadText(
+      evidenceMapMarkdown(claims, active.content, references, active.title),
+      `${base}-evidence-map.md`,
+      'text/markdown;charset=utf-8'
+    )
+    notify('Evidence map exported as Markdown.', 'success')
+  }
+
   const generateSuggestion = async () => {
     const selected = selection && selection.text ? selection : captureSelection()
     if (!selected || !selected.text.trim()) { notify('Select a sentence or paragraph in the draft first.', 'warning'); return }
@@ -346,7 +452,7 @@ export default function WritingLab() {
   if (loading) return <div className="grid min-h-[60vh] place-items-center"><Spinner label="Opening Writing Lab…" /></div>
 
   return <div>
-    <PageHeader eyebrow="WRITING / 01" title="Writing Lab" description="Draft in plain text with local, rule-based checks and reviewable inline rewrites — no AI service and no detector claims."
+    <PageHeader eyebrow="WRITING / 01" title="Writing Lab" description="Draft with outline templates, section guidance and a claim–evidence map linked to saved references — plus local checks and reviewable inline rewrites."
       actions={<>
         <Button variant="ghost" onClick={undo} disabled={!canUndo(editStack)} icon={<Undo2 size={14} />} title="Undo (Ctrl/Cmd+Z)">Undo</Button>
         <Button variant="ghost" onClick={redo} disabled={!canRedo(editStack)} icon={<Redo2 size={14} />} title="Redo (Ctrl/Cmd+Shift+Z)">Redo</Button>
@@ -377,6 +483,31 @@ export default function WritingLab() {
           <div className="mt-2 flex items-center gap-1.5"><Input type="number" min={1} value={target} onChange={(event) => setTarget(event.target.value)} aria-label="Word target" /><span className="text-[10px] text-slate-400">words</span></div>
           <ProgressBar value={Math.min(100, (stats.wordCount / targetNumber) * 100)} />
           <p className="mt-1 text-[9.5px] text-slate-400">{stats.wordCount.toLocaleString()} / {targetNumber.toLocaleString()} words</p>
+        </Card>
+
+        <Card className="p-3">
+          <h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><List size={13} className="text-blue-500" />Outline templates</h2>
+          <Field label="Structure" className="mt-2">
+            <Select value={templateId} onChange={(event) => setTemplateId(event.target.value)} className="!h-8 !text-[11px]" aria-label="Outline template">
+              {DRAFT_TEMPLATES.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}
+            </Select>
+          </Field>
+          <p className="mt-1.5 text-[9px] leading-relaxed text-slate-400">{getTemplate(templateId)?.description}</p>
+          <Button size="sm" className="mt-2 w-full" onClick={applyTemplate} disabled={!active} icon={<FileText size={12} />}>Apply outline</Button>
+          <p className="mt-1.5 text-[9px] leading-relaxed text-slate-400">Adds clean Markdown headings. Writing prompts stay in this panel, not in the exported draft.</p>
+        </Card>
+
+        <Card className="p-3">
+          <div className="flex items-center justify-between"><h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><List size={13} className="text-indigo-500" />Section guide</h2><Badge tone="slate">{sections.length}</Badge></div>
+          {sections.length ? <div className="mt-2 max-h-[300px] space-y-1.5 overflow-auto pr-0.5">
+            {sections.map((section) => <div key={section.id} className="rounded-lg border border-slate-100 bg-slate-50/60 p-2">
+              <button type="button" onClick={() => jumpToSection(section.start)} className="flex w-full items-center justify-between gap-2 text-left" title="Jump to this section">
+                <span className="min-w-0 truncate text-[10px] font-bold text-slate-700">{section.title}</span>
+                <span className="shrink-0 text-[9px] text-slate-400">{section.wordCount} words</span>
+              </button>
+              <p className="mt-1 text-[9px] leading-relaxed text-slate-500">{sectionGuidance(active?.template, section.title)}</p>
+            </div>)}
+          </div> : <p className="mt-2 text-[10px] leading-relaxed text-slate-400">No Markdown headings yet. Apply an outline above or add your own <code>## Section</code> headings to jump between sections.</p>}
         </Card>
 
         <Card className="p-3">
@@ -483,6 +614,53 @@ export default function WritingLab() {
         </Card>
 
         <Card className="p-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><Map size={13} className="text-indigo-500" />Claim–evidence map</h2>
+            <div className="flex flex-wrap gap-1">
+              <Badge tone="green">{claimSummary.supported} supported</Badge>
+              {claimSummary.unsupported > 0 && <Badge tone="amber">{claimSummary.unsupported} unchecked</Badge>}
+              {claimSummary.stale > 0 && <Badge tone="slate">{claimSummary.stale} stale</Badge>}
+            </div>
+          </div>
+          <p className="mt-2 text-[10px] leading-relaxed text-slate-500">Select a sentence in the draft, add it as a claim, then link saved references as evidence. Nothing is sent anywhere.</p>
+          <div className="mt-2 flex gap-1">
+            <Button size="sm" variant="primary" className="flex-1" onClick={addClaim} disabled={!active} icon={<Plus size={12} />}>Add selected claim</Button>
+            <Button size="sm" variant="secondary" onClick={exportEvidenceMap} disabled={!active} icon={<ArrowDownToLine size={12} />}>Export map</Button>
+          </div>
+          {claims.length ? <div className="mt-2 max-h-[42vh] space-y-2 overflow-auto pr-1">
+            {claims.map((claim) => {
+              const status = claimStatus(claim, active?.content || '', references)
+              const tone = status.stale ? 'slate' : status.supported ? 'green' : 'amber'
+              return <div key={claim.id} className="rounded-lg border border-slate-200 bg-slate-50/70 p-2">
+                <div className="flex items-start gap-1.5">
+                  <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${tone === 'green' ? 'bg-emerald-500' : tone === 'amber' ? 'bg-amber-500' : 'bg-slate-400'}`} />
+                  <p className="min-w-0 flex-1 text-[9.5px] leading-relaxed text-slate-600">&ldquo;{claim.text.slice(0, 180)}{claim.text.length > 180 ? '…' : ''}&rdquo;</p>
+                  <button type="button" onClick={() => removeClaim(claim.id)} className="shrink-0 text-slate-300 hover:text-red-500" aria-label={`Remove claim: ${claim.text.slice(0, 40)}`}><X size={12} /></button>
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                  <Badge tone={tone}>{status.stale ? 'Stale' : status.supported ? 'Supported' : 'Unchecked'}</Badge>
+                  {claim.section && <Badge tone="blue">{claim.section}</Badge>}
+                </div>
+                {status.linkedIds.length > 0 && <div className="mt-1.5 flex flex-wrap gap-1">
+                  {status.linkedIds.map((id: string) => <span key={id} className="inline-flex max-w-full items-center gap-1 rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[9px] text-emerald-700">
+                    <Link2 size={9} className="shrink-0" />
+                    <span className="truncate">{referenceLabel(references.find((reference) => reference.id === id))}</span>
+                    <button type="button" onClick={() => unlinkReference(claim.id, id)} aria-label={`Unlink ${references.find((reference) => reference.id === id)?.title || 'reference'}`} className="text-emerald-400 hover:text-red-500"><X size={9} /></button>
+                  </span>)}
+                </div>}
+                {references.length > 0 && <div className="mt-1.5 flex gap-1">
+                  <Select value={claimChoice[claim.id] || ''} onChange={(event) => setClaimChoice((current) => ({ ...current, [claim.id]: event.target.value }))} className="!h-7 !rounded-lg !px-2 !text-[9.5px]" aria-label={`Evidence for claim: ${claim.text.slice(0, 40)}`}>
+                    <option value="">Choose a saved reference…</option>
+                    {references.map((reference) => <option key={reference.id} value={reference.id}>{referenceLabel(reference).slice(0, 80)}</option>)}
+                  </Select>
+                  <Button size="sm" variant="secondary" className="!h-7 !px-2" onClick={() => linkReference(claim.id)} disabled={!claimChoice[claim.id]} icon={<Link2 size={10} />}>Link</Button>
+                </div>}
+              </div>
+            })}
+          </div> : <p className="mt-2 text-[10px] leading-relaxed text-slate-400">No claims tracked yet. Stale claims are those whose text no longer appears in the draft; they stay in the exported map as a separate list.</p>}
+        </Card>
+
+        <Card className="p-3.5">
           <div className="flex items-center justify-between"><h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><Sparkles size={13} className="text-blue-500" />Writing checks</h2><Badge tone="blue">rule-based</Badge></div>
           <div className="mt-2 space-y-1.5">
             <CheckRow label="Readability" value={stats.flesch === null ? '—' : `${Math.round(stats.flesch)} · ${readabilityLabel(stats.flesch)}`} good={stats.flesch === null || stats.flesch >= 50} />
@@ -493,6 +671,7 @@ export default function WritingLab() {
             <CheckRow label="Possible passive voice" value={stats.passiveCount ? `${stats.passiveCount} phrase(s); review in context` : 'No simple patterns found'} good={!stats.passiveCount} />
             <CheckRow label="In-text citations" value={`${stats.citationCount} author–year pattern(s)`} good={stats.citationCount > 0} neutral={!stats.wordCount} />
             <CheckRow label="Markdown headings" value={stats.headingCount ? `${stats.headingCount} heading(s)` : 'None'} good={stats.headingCount > 0} neutral={!stats.wordCount} />
+            <CheckRow label="Claim evidence" value={claimSummary.total ? `${claimSummary.supported}/${claimSummary.total} supported${claimSummary.stale ? ` · ${claimSummary.stale} stale` : ''}` : 'No claims tracked'} good={claimSummary.total > 0 && claimSummary.supported === claimSummary.total && claimSummary.stale === 0} neutral={claimSummary.total === 0} />
           </div>
           <Callout tone="warning">These heuristics can produce false positives. They are not a grammar checker and cannot reliably detect AI-generated text.</Callout>
         </Card>

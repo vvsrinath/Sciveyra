@@ -14,7 +14,7 @@ Everything runs in the browser. No account, backend, paid API or AI API is requi
 - **Diagram Studio** — build flowcharts and schematics with draggable nodes and labelled connections, then export PNG/SVG/PDF.
 - **Reference Finder** — search free scholarly metadata from OpenAlex, DOAJ, Europe PMC / PubMed Central, Crossref and arXiv; resolve OA links with your own Unpaywall email; review and save records. A peer-reviewed bundle queries OpenAlex + DOAJ + Europe PMC + Crossref. Cached results are labelled fresh/stale with per-source health; refresh bypasses the local cache. Patent/IP and pattern rows link out to external search engines rather than inventing results.
 - **Reference Manager** — add, edit, filter and sort references; import/export BibTeX and RIS; deduplicate; copy formatted citations and in-text citations; resolve a DOI or title to metadata; add a reference from a PDF DOI.
-- **Writing Lab** — Markdown draft editor with debounced autosave, undo/redo, word targets, citation-style-aware insertion, rule-based writing checks, selection-scoped inline rewrites with per-change accept/reject, and TXT/MD export.
+- **Writing Lab** — Markdown draft editor with outline templates and section guidance, a claim–evidence map linked to saved references, debounced autosave, undo/redo, word targets, citation-style-aware insertion, rule-based writing checks, selection-scoped inline rewrites with per-change accept/reject, and TXT/MD/evidence-map export.
 - **Paragraph Rewriter** — local deterministic humanising/rewriting with protected numbers, units, DOIs, URLs and citations. Optionally use a self-hosted Ollama endpoint/model you supply; no paid AI API or key is required.
 - **Feature Tester** — run 17 in-app checks across datasets, every 2D and 3D graph type, analysis, exports, references, rewriting and browser capabilities; export a JSON report.
 - **Projects** — browse every stored collection, search/filter/sort, open or delete items and inspect storage usage.
@@ -77,7 +77,7 @@ sciveyra-frontend/
 │   │   ├── figure-composer/  Multi-panel figure layout
 │   │   ├── diagram-studio/   Flowcharts and schematics
 │   │   ├── research/          Multi-source Reference Finder and reference library
-│   │   ├── writing-lab/      Draft editor and citation insertion
+│   │   ├── writing-lab/      Draft editor, outlines, claim map and citations
 │   │   ├── text-lab/         Local/Ollama paragraph rewriter
 │   │   ├── testing/          Built-in feature tester
 │   │   ├── home/             Dashboard
@@ -107,7 +107,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/GRAPHING.md`](docs/GR
 
 ## Testing
 
-The suite covers parsing, statistics, curve fitting, references, multi-source discovery adapters, rewriting, the built-in test runner, storage, sample data, graph validation and figure building. Graph tests exercise every 2D type (`line`, `scatter`, `bar`, `area`, `histogram`, `box`, `errorbar`, `heatmap`, `contour`, `spectrum`) and every 3D type (`surface`, `mesh3d`, `scatter3d`), including error-bar alignment, fit labels, publication defaults and 3D contour/lighting/opacity controls.
+The suite covers parsing, statistics, curve fitting, references, multi-source discovery adapters, drafting templates, claim/evidence helpers, rewriting, the built-in test runner, storage, sample data, graph validation and figure building. Graph tests exercise every 2D type (`line`, `scatter`, `bar`, `area`, `histogram`, `box`, `errorbar`, `heatmap`, `contour`, `spectrum`) and every 3D type (`surface`, `mesh3d`, `scatter3d`), including error-bar alignment, fit labels, publication defaults and 3D contour/lighting/opacity controls.
 
 ```bash
 npm test
@@ -130,6 +130,7 @@ The app is a static single-page application. A ready-to-use Netlify configuratio
 
 - Sample datasets are explicitly labelled **synthetic** and must not be treated as experimental measurements.
 - Writing checks are simple heuristics. They are not a grammar checker and cannot reliably detect AI-generated text.
+- Claim status uses exact text matching and saved-reference IDs; it cannot judge whether a source actually supports a claim. Review every evidence link yourself.
 - Chart PDF export embeds a high-resolution raster image; it is not a native vector PDF. Use SVG for vector workflows.
 - Raster-to-vector tracing suits line art, logos and simple diagrams, not photographs or continuous-tone microscopy.
 - Vector tracing and image processing depend on browser canvas/WebGL support.
