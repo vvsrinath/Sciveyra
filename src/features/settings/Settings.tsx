@@ -161,7 +161,9 @@ export default function Settings() {
           <ul className="mt-2 space-y-2 text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
             <li className="flex gap-2"><Check size={12} className="mt-0.5 shrink-0 text-emerald-500" />No account, analytics profile, paid API or AI API is required.</li>
             <li className="flex gap-2"><Check size={12} className="mt-0.5 shrink-0 text-emerald-500" />Images, spreadsheets and drafts are processed in this browser.</li>
-            <li className="flex gap-2"><Info size={12} className="mt-0.5 shrink-0 text-blue-500" />Research Navigator contacts Crossref or Europe PMC directly only when you search.</li>
+            <li className="flex gap-2"><Info size={12} className="mt-0.5 shrink-0 text-blue-500" />Reference Finder contacts only the sources you choose when you search. OpenAlex and DOAJ are called directly; Crossref, Europe PMC, arXiv and Unpaywall may use same-origin Netlify proxies for browser access. No keys are sent.</li>
+            <li className="flex gap-2"><Info size={12} className="mt-0.5 shrink-0 text-blue-500" />Unpaywall enrichment needs your own email, stored only in this browser. IP/patent and pattern rows open external search websites; they are links, not fabricated results.</li>
+            <li className="flex gap-2"><Info size={12} className="mt-0.5 shrink-0 text-blue-500" />Paragraph rewriting is local and deterministic by default. An Ollama endpoint/model, if you enter one, is stored only in this browser and contacted only when you choose that mode.</li>
             <li className="flex gap-2"><Info size={12} className="mt-0.5 shrink-0 text-blue-500" />Sample datasets are explicitly labelled synthetic and must not be treated as experimental evidence.</li>
             <li className="flex gap-2"><TriangleAlert size={12} className="mt-0.5 shrink-0 text-amber-500" />Browser storage is not a backup. Export JSON backups regularly.</li>
             <li className="flex gap-2"><TriangleAlert size={12} className="mt-0.5 shrink-0 text-amber-500" />Writing checks are simple heuristics, not a grammar checker or AI detector.</li>

@@ -39,13 +39,21 @@ Rules of thumb:
 | `/vector` | `features/vector-studio` |
 | `/figures` | `features/figure-composer` |
 | `/diagrams` | `features/diagram-studio` |
-| `/navigator` | `features/research/ResearchNavigator` |
+| `/navigator` | `features/research/ResearchNavigator` (Reference Finder) |
 | `/references` | `features/research/ReferenceManager` |
 | `/writing` | `features/writing-lab` |
+| `/rewriter` | `features/text-lab/ParagraphRewriter` |
+| `/tester` | `features/testing/FeatureTester` |
 | `/projects` | `features/projects` |
 | `/settings` | `features/settings` |
 
 Unknown paths redirect to `/home`. Netlify rewrites all paths to `index.html` so deep links work in production.
+
+## Domain helpers
+
+- `src/lib/metadata.js` normalises OpenAlex, DOAJ, Europe PMC, Crossref, arXiv and Unpaywall payloads, deduplicates results and builds external patent/pattern links. Browser-incompatible providers fall back to same-origin `/api/*` rewrites defined in `netlify.toml` and `vite.config.ts`.
+- `src/lib/rewriter.js` performs deterministic local paragraph rewriting and optionally calls a user-supplied self-hosted Ollama endpoint. It protects numbers, units, DOIs, URLs and citation markers; no key or hosted service is involved.
+- `src/lib/featureTests.js` uses the same pure builders as the studios. `runFeatureTests` never throws for a failed check, so the Feature Tester can show a complete report.
 
 ## State and storage
 
@@ -85,8 +93,8 @@ Never import one feature from another. If two features need the same behaviour, 
 
 - TypeScript for React and shared contracts; plain JavaScript + JSDoc for `src/lib`.
 - Function components and hooks only.
-- Tailwind utility classes; design tokens in `tailwind.config.js`.
+- Tailwind utility classes; design tokens in `tailwind.config.js`. Use the shared `.glass-panel`, `.glass-subtle` and `.glass-chip` classes in `src/styles/index.css` for new surfaces rather than ad hoc blur utilities.
 - Light theme only. Do not add `dark:` variants or toggle a `dark` class.
 - Every numeric option should be finite by the time it reaches Plotly; sanitise in `normalizeConfig`.
 - Synthetic data must keep `source: 'sample'` and a warning that it is not experimental.
-- Do not add paid or hosted AI APIs. Network calls are limited to public scholarly metadata.
+- Do not add paid or hosted AI APIs. Network calls are limited to public scholarly metadata (direct or same-origin `/api/*` proxies) and, only if the user opts in, a self-hosted Ollama endpoint entered in the browser settings.

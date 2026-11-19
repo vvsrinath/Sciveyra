@@ -13,6 +13,13 @@ export const COLORSCALES = {
   Spectrum: [[0, '#313695'], [0.2, '#4575b4'], [0.4, '#74add1'], [0.6, '#fee090'], [0.8, '#f46d43'], [1, '#a50026']]
 }
 
+export const LIGHTING_PRESETS = {
+  soft: { label: 'Soft', lighting: { ambient: 0.85, diffuse: 0.72, specular: 0.28, roughness: 0.55, fresnel: 0.1 } },
+  glossy: { label: 'Glossy', lighting: { ambient: 0.55, diffuse: 0.65, specular: 1.1, roughness: 0.15, fresnel: 0.4 } },
+  matte: { label: 'Matte', lighting: { ambient: 1, diffuse: 0.75, specular: 0.05, roughness: 0.9, fresnel: 0 } },
+  flat: { label: 'Flat', lighting: { ambient: 1, diffuse: 0, specular: 0, roughness: 1, fresnel: 0 }, flatshading: true }
+}
+
 export const PLOT_TYPES = [
   { id: 'line', label: 'Line' },
   { id: 'scatter', label: 'Scatter' },
@@ -72,14 +79,17 @@ export function defaultConfig(dataset, overrides = {}) {
     plotBackground: '#ffffff',
     colorscale: 'Viridis',
     reverseColorscale: false,
-    width: 900,
-    height: 560,
+    width: 1000,
+    height: 620,
     smoothing: false,
     lineShape: 'linear',
     bargap: 0.2,
     barMode: 'group',
     histogramBins: 0,
     boxPoints: 'outliers',
+    surfaceContours: false,
+    surfaceLighting: 'soft',
+    surfaceOpacity: 1,
     annotations: [],
     refLines: [],
     ...overrides
@@ -106,8 +116,8 @@ export function normalizeConfig(input = {}) {
   config.markerSize = numeric(config.markerSize, 7)
   config.bargap = numeric(config.bargap, 0.2)
   config.histogramBins = Math.max(0, Math.min(200, Math.round(numeric(config.histogramBins, 0))))
-  config.width = Math.max(320, Math.min(4000, numeric(config.width, 900)))
-  config.height = Math.max(240, Math.min(4000, numeric(config.height, 560)))
+  config.width = Math.max(320, Math.min(4000, numeric(config.width, 1000)))
+  config.height = Math.max(240, Math.min(4000, numeric(config.height, 620)))
   if (!['group', 'stack', 'relative', 'overlay'].includes(config.barMode)) config.barMode = 'group'
   if (!['all', 'outliers', 'suspectedoutliers', 'none'].includes(config.boxPoints)) config.boxPoints = 'outliers'
   if (!['linear', 'spline', 'hv', 'vh', 'hvh'].includes(config.lineShape)) config.lineShape = 'linear'
@@ -118,6 +128,9 @@ export function normalizeConfig(input = {}) {
   config.fontFamily = FONTS.includes(config.fontFamily) ? config.fontFamily : 'DM Sans'
   config.markerShape = MARKER_SHAPES.includes(config.markerShape) ? config.markerShape : 'circle'
   if (!['solid', 'dot', 'dash', 'longdash', 'dashdot'].includes(config.lineDash)) config.lineDash = 'solid'
+  config.surfaceContours = Boolean(config.surfaceContours)
+  if (!['soft', 'glossy', 'matte', 'flat'].includes(config.surfaceLighting)) config.surfaceLighting = 'soft'
+  config.surfaceOpacity = Math.max(0.2, Math.min(1, numeric(config.surfaceOpacity, 1)))
   return config
 }
 
@@ -182,10 +195,10 @@ export function validateConfig(dataset, config) {
 /**
  * @param {import('../types').Dataset|null|undefined} dataset
  * @param {import('../types').GraphConfig} inputConfig
- * @param {{dark?: boolean, extraTraces?: any[]}} [options]
+ * @param {{dark?: boolean, extraTraces?: any[], fitLabel?: string}} [options]
  * @returns {{data: any[], layout: any}}
  */
-export function buildPlotlyFigure(dataset, inputConfig, { dark = false, extraTraces = [] } = {}) {
+export function buildPlotlyFigure(dataset, inputConfig, { dark = false, extraTraces = [], fitLabel = '' } = {}) {
   const config = normalizeConfig(inputConfig)
   const { errors } = validateConfig(dataset, config)
   if (!dataset || errors.length) return { data: [], layout: baseLayout(config, dark) }
@@ -302,7 +315,22 @@ export function buildPlotlyFigure(dataset, inputConfig, { dark = false, extraTra
   }
   layout.shapes = referenceShapes(config, dataset)
   layout.annotations = chartAnnotations(config)
+  if (fitLabel) layout.annotations.push(fitLabelAnnotation(fitLabel, config, dark))
   return { data: [...data, ...extraTraces], layout }
+}
+
+function fitLabelAnnotation(label, config, dark) {
+  return {
+    text: String(label).slice(0, 260),
+    xref: 'paper', yref: 'paper', x: 0.015, y: 0.985,
+    xanchor: 'left', yanchor: 'top', align: 'left',
+    showarrow: false,
+    font: { size: Math.max(9, config.fontSize - 1), color: dark ? '#dbe4f0' : '#334155', family: config.fontFamily },
+    bgcolor: dark ? 'rgba(15,23,42,.82)' : 'rgba(255,255,255,.86)',
+    bordercolor: dark ? '#475569' : '#dbe4f0',
+    borderwidth: 1,
+    borderpad: 5
+  }
 }
 
 function attachErrors(trace, dataset, config, yKey) {
@@ -397,7 +425,7 @@ function build3DFigure(dataset, config, { dark }) {
       x: points.map((row) => row[config.xKey]),
       y: points.map((row) => row[config.yKeys[0]]),
       z: points.map((row) => row[config.zKey]),
-      marker: { size: Math.max(2, config.markerSize - 2), color: points.map((row) => row[config.zKey]), colorscale: colorScale(config), reversescale: !!config.reverseColorscale, colorbar: { title: { text: columnName(dataset, config.zKey) } }, opacity: 0.9 },
+      marker: { size: Math.max(2, config.markerSize - 2), color: points.map((row) => row[config.zKey]), colorscale: colorScale(config), reversescale: !!config.reverseColorscale, colorbar: { title: { text: columnName(dataset, config.zKey) } }, opacity: config.surfaceOpacity },
       name: dataset.name
     })
   } else {
@@ -412,7 +440,11 @@ function build3DFigure(dataset, config, { dark }) {
           colorscale: colorScale(config),
           reversescale: !!config.reverseColorscale,
           colorbar: { title: { text: columnName(dataset, config.zKey) } },
-          connectgaps: false
+          connectgaps: false,
+          opacity: config.surfaceOpacity,
+          lighting: lightingFor(config),
+          lightposition: { x: 120, y: 220, z: 420 },
+          contours: config.surfaceContours ? surfaceContours(config) : undefined
         })
       } else {
         const vertices = { x: [], y: [], z: [] }
@@ -451,7 +483,10 @@ function build3DFigure(dataset, config, { dark }) {
           intensity: vertices.z,
           colorscale: colorScale(config),
           reversescale: !!config.reverseColorscale,
-          opacity: 0.95,
+          opacity: config.surfaceOpacity,
+          lighting: lightingFor(config),
+          lightposition: { x: 120, y: 220, z: 420 },
+          flatshading: config.surfaceLighting === 'flat',
           colorbar: { title: { text: columnName(dataset, config.zKey) } }
         })
       }
@@ -473,9 +508,14 @@ function baseLayout(config, dark) {
     tickfont: { color: muted, size: Math.max(9, config.fontSize - 2), family: config.fontFamily },
     titlefont: { color: text, size: config.fontSize + 1, family: config.fontFamily },
     showgrid: !!config.showGrid,
+    gridwidth: 1,
+    layer: 'belowTraces',
+    zeroline: false,
     showline: true,
+    linewidth: 1,
     mirror: false,
     ticks: 'outside',
+    ticklen: 4,
     tickcolor: dark ? '#3b4a63' : '#9aa8bc',
     tickformat: config.tickFormat || undefined,
     minor: config.showMinorTicks ? { ticks: 'outside', ticklen: 2 } : undefined,
@@ -488,8 +528,10 @@ function baseLayout(config, dark) {
     font: { family: config.fontFamily, size: config.fontSize, color: text },
     margin: { l: 72, r: config.secondaryYKeys.length ? 80 : 28, t: config.title ? 56 : 24, b: 62 },
     hovermode: 'closest',
+    hoverlabel: { bgcolor: dark ? '#0f172a' : '#ffffff', bordercolor: dark ? '#475569' : '#cbd5e1', font: { family: config.fontFamily, size: Math.max(10, config.fontSize - 1) } },
+    separators: '.,',
     showlegend: !!config.showLegend,
-    legend: legendLayout(config),
+    legend: legendLayout(config, dark),
     xaxis: {
       ...axis,
       title: { text: config.xLabel || '', font: { color: text, size: config.fontSize + 1, family: config.fontFamily } },
@@ -518,7 +560,7 @@ function baseLayout(config, dark) {
   return layout
 }
 
-function legendLayout(config) {
+function legendLayout(config, dark) {
   const positions = {
     'top-right': { x: 0.99, y: 0.99, xanchor: 'right', yanchor: 'top' },
     'top-left': { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
@@ -526,7 +568,13 @@ function legendLayout(config) {
     'bottom-left': { x: 0.01, y: 0.01, xanchor: 'left', yanchor: 'bottom' },
     'top-center': { x: 0.5, y: 1.04, xanchor: 'center', yanchor: 'bottom' }
   }
-  return { ...(positions[config.legendPosition] || positions['top-right']), bgcolor: 'rgba(0,0,0,0)', orientation: 'h' }
+  return {
+    ...(positions[config.legendPosition] || positions['top-right']),
+    bgcolor: dark ? 'rgba(15,23,42,.75)' : 'rgba(255,255,255,.78)',
+    bordercolor: dark ? '#475569' : '#e2e8f0',
+    borderwidth: 1,
+    orientation: 'h'
+  }
 }
 
 function axisRange(min, max, log) {
@@ -576,6 +624,20 @@ function chartAnnotations(config) {
 function colorScale(config) {
   const scale = COLORSCALES[config.colorscale] || COLORSCALES.Viridis
   return scale
+}
+
+function lightingFor(config) {
+  const preset = LIGHTING_PRESETS[config.surfaceLighting] || LIGHTING_PRESETS.soft
+  return { ...preset.lighting }
+}
+
+function surfaceContours(config) {
+  const line = { color: '#475569', width: 1, show: true }
+  return {
+    x: { ...line },
+    y: { ...line },
+    z: { ...line, color: '#0f172a', width: 1.2 }
+  }
 }
 
 export function columnName(dataset, key) {

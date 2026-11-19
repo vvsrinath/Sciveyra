@@ -186,8 +186,8 @@ export default function GraphSettings(props: Props) {
         <Toggle label="Reverse color scale" checked={config.reverseColorscale} onChange={(value) => onChange({ reverseColorscale: value })} />
       </>}
       <div className="mt-2 grid grid-cols-2 gap-2">
-        <Field label="Export width"><Input type="number" min={320} max={4000} value={config.width} onChange={(event) => onChange({ width: Number(event.target.value) || 900 })} /></Field>
-        <Field label="Export height"><Input type="number" min={240} max={4000} value={config.height} onChange={(event) => onChange({ height: Number(event.target.value) || 560 })} /></Field>
+        <Field label="Export width"><Input type="number" min={320} max={4000} value={config.width} onChange={(event) => onChange({ width: Number(event.target.value) || 1000 })} /></Field>
+        <Field label="Export height"><Input type="number" min={240} max={4000} value={config.height} onChange={(event) => onChange({ height: Number(event.target.value) || 620 })} /></Field>
       </div>
     </Collapsible>
 

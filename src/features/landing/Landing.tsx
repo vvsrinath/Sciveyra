@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom'
 import {
-  ArrowRight, BookOpen, Box, Check, FileImage, FileText, Grid2X2, HardDrive,
+  ArrowRight, BookOpen, Box, Check, FileImage, FileText, FlaskConical, Grid2X2, HardDrive,
   Image as ImageIcon, Layers, LineChart, MousePointer2, Network, Palette, Search,
-  ShieldCheck, Sparkles
+  ShieldCheck, Sparkles, WandSparkles
 } from 'lucide-react'
 import Logo from '../../components/Logo'
 
@@ -12,7 +12,9 @@ const features = [
   { icon: ImageIcon, title: 'Image studio', desc: 'Crop, resize, adjust and annotate microscopy or lab images without uploading them.', to: '/images', tint: 'from-emerald-50 to-teal-50 text-emerald-600 ring-emerald-100' },
   { icon: FileImage, title: 'Vector studio', desc: 'Trace suitable raster artwork into editable SVG paths for crisp, scalable figures.', to: '/vector', tint: 'from-cyan-50 to-sky-50 text-cyan-600 ring-cyan-100' },
   { icon: Grid2X2, title: 'Figure composer', desc: 'Assemble multi-panel figures with live graphs and export PNG, SVG or print-ready PDF.', to: '/figures', tint: 'from-orange-50 to-amber-50 text-orange-600 ring-orange-100' },
-  { icon: Search, title: 'Research navigator', desc: 'Look up public academic metadata from Crossref and Europe PMC, then save the record.', to: '/navigator', tint: 'from-pink-50 to-rose-50 text-pink-600 ring-pink-100' }
+  { icon: Search, title: 'Reference Finder', desc: 'Find papers across OpenAlex, DOAJ, Europe PubMed Central, Crossref and arXiv, then save the record.', to: '/navigator', tint: 'from-pink-50 to-rose-50 text-pink-600 ring-pink-100' },
+  { icon: WandSparkles, title: 'Paragraph Rewriter', desc: 'Humanise and tighten scientific prose locally, with optional self-hosted Ollama and no paid AI API.', to: '/rewriter', tint: 'from-violet-50 to-purple-50 text-violet-600 ring-violet-100' },
+  { icon: FlaskConical, title: 'Built-in tester', desc: 'Check every graph type, analysis helper, export path and writing tool from inside the app.', to: '/tester', tint: 'from-slate-50 to-blue-50 text-blue-600 ring-blue-100' }
 ]
 
 const tools = [
@@ -22,9 +24,11 @@ const tools = [
   { label: 'Vector Studio', to: '/vector', icon: FileImage },
   { label: 'Figure Composer', to: '/figures', icon: Grid2X2 },
   { label: 'Diagram Studio', to: '/diagrams', icon: Network },
-  { label: 'Research Navigator', to: '/navigator', icon: Search },
+  { label: 'Reference Finder', to: '/navigator', icon: Search },
   { label: 'Reference Manager', to: '/references', icon: BookOpen },
-  { label: 'Writing Lab', to: '/writing', icon: FileText }
+  { label: 'Writing Lab', to: '/writing', icon: FileText },
+  { label: 'Paragraph Rewriter', to: '/rewriter', icon: WandSparkles },
+  { label: 'Feature Tester', to: '/tester', icon: FlaskConical }
 ]
 
 /* --- Decorative 3D surface mesh (pure SVG, no data claims) --------------- */
@@ -204,7 +208,7 @@ export default function Landing() {
       <section className="mx-auto max-w-7xl px-5 sm:px-8">
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-slate-200/80 bg-slate-200/70 sm:grid-cols-4">
           {[
-            { value: '9', label: 'Focused research tools' },
+            { value: '12', label: 'Focused research tools' },
             { value: '100%', label: 'Browser-first workflow' },
             { value: '0', label: 'AI API keys required' },
             { value: '∞', label: 'Ideas to explore' }
@@ -247,7 +251,7 @@ export default function Landing() {
               <h2 className="mt-4 font-display text-[32px] font-extrabold leading-[1.08] tracking-[-0.035em] text-slate-900 sm:text-[40px]">See your data in three dimensions.</h2>
               <p className="mt-4 max-w-lg text-[13.5px] leading-relaxed text-slate-500">Turn real XYZ measurements into surfaces, meshes and 3D scatter plots. Rotate, zoom and pan directly in the browser, then export a high-resolution PNG or PDF.</p>
               <ul className="mt-6 space-y-3">
-                {['Surface, mesh and 3D scatter from real datasets', 'Viridis, Plasma, Ocean and Spectrum colour scales', 'Camera presets, marker sizing and axis titles', 'Raster export with clean white backgrounds'].map((item) => <li key={item} className="flex items-start gap-2.5 text-[12.5px] font-medium text-slate-600"><span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-100"><Check size={11} /></span>{item}</li>)}
+                {['Surface, mesh and 3D scatter from real datasets', 'Surface contours, lighting presets and opacity control', 'Viridis, Plasma, Ocean and Spectrum colour scales', 'Camera presets, marker sizing and high-resolution export'].map((item) => <li key={item} className="flex items-start gap-2.5 text-[12.5px] font-medium text-slate-600"><span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-100"><Check size={11} /></span>{item}</li>)}
               </ul>
               <Link to="/three-d" className="mt-7 inline-flex h-11 items-center gap-2 rounded-xl bg-slate-900 px-5 text-[12.5px] font-bold text-white shadow-[0_12px_28px_-12px_rgba(15,23,42,.7)] transition hover:-translate-y-0.5 hover:bg-slate-800">
                 Open 3D Graph Studio <ArrowRight size={15} />
@@ -279,7 +283,7 @@ export default function Landing() {
           <div className="inline-flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.2em] text-indigo-600">
             <span className="h-1.5 w-1.5 rounded-full bg-gradient-to-br from-indigo-500 to-cyan-400" /> Open the workspace
           </div>
-          <h2 className="mt-4 font-display text-[34px] font-extrabold leading-[1.1] tracking-[-0.035em] text-slate-900 sm:text-[42px]">Nine focused tools.<br className="hidden sm:block" /> One clear flow.</h2>
+          <h2 className="mt-4 font-display text-[34px] font-extrabold leading-[1.1] tracking-[-0.035em] text-slate-900 sm:text-[42px]">Twelve focused tools.<br className="hidden sm:block" /> One clear flow.</h2>
         </div>
         <div className="mx-auto mt-10 flex max-w-3xl flex-wrap justify-center gap-2.5">
           {tools.map((tool) => <Link key={tool.label} to={tool.to} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3.5 py-2 text-[11.5px] font-bold text-slate-600 shadow-[0_1px_2px_rgba(15,23,42,.04)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50/60 hover:text-blue-700">
@@ -294,7 +298,7 @@ export default function Landing() {
           <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white text-emerald-600 shadow-soft ring-1 ring-inset ring-emerald-100"><ShieldCheck size={22} /></div>
           <div className="flex-1">
             <h3 className="font-display text-[18px] font-extrabold tracking-tight text-slate-900">Your research. Your browser. Your control.</h3>
-            <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-slate-500">Projects, datasets, figures and references stay in local browser storage. Back up and restore everything as JSON. Online academic search is optional and contacts only the provider you choose.</p>
+            <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-slate-500">Projects, datasets, figures and references stay in local browser storage. Back up and restore everything as JSON. Academic search is optional and contacts only the source you choose; rewriting is local unless you explicitly enable a self-hosted Ollama endpoint.</p>
           </div>
           <Link to="/settings" className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 text-[12px] font-bold text-emerald-700 transition hover:-translate-y-0.5 hover:bg-emerald-50">
             Privacy controls <ArrowRight size={14} />

@@ -3,7 +3,7 @@ import type { ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, ReactNo
 import { AlertTriangle, CheckCircle2, ChevronDown, Info, Loader2, X, XCircle } from 'lucide-react'
 import { useApp } from '../app/AppContext'
 
-export const inputClass = 'h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,.03)] outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10'
+export const inputClass = 'h-10 w-full rounded-xl border border-slate-200/90 bg-white/80 px-3 text-[13px] font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,.03)] outline-none backdrop-blur-sm transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10'
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
@@ -14,7 +14,7 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 export function Button({ variant = 'secondary', size = 'md', className = '', icon, children, ...props }: ButtonProps) {
   const variants = {
     primary: 'border-transparent bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-[0_8px_20px_-8px_rgba(37,99,235,.6)] hover:shadow-[0_12px_26px_-8px_rgba(37,99,235,.7)] hover:brightness-[1.04]',
-    secondary: 'border-slate-200 bg-white text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,.04)] hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900',
+    secondary: 'glass-chip border-slate-200/90 text-slate-700 hover:border-blue-200 hover:bg-white hover:text-slate-900',
     ghost: 'border-transparent bg-transparent text-slate-600 hover:bg-slate-100/80 hover:text-slate-900',
     danger: 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
   }
@@ -30,13 +30,13 @@ export function IconButton({ label, className = '', children, ...props }: Button
     type="button"
     aria-label={label}
     title={label}
-    className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-[0_1px_2px_rgba(15,23,42,.03)] transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 ${className}`}
+    className={`glass-chip inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border-slate-200 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 ${className}`}
     {...props}
   >{children}</button>
 }
 
 export function Card({ children, className = '', ...props }: HTMLAttributes<HTMLElement> & { children: ReactNode }) {
-  return <section className={`rounded-2xl border border-slate-200/90 bg-white shadow-card ${className}`} {...props}>{children}</section>
+  return <section className={`glass-panel rounded-2xl ${className}`} {...props}>{children}</section>
 }
 
 export function Field({ label, htmlFor, hint, children, required, className = '' }: {
@@ -152,7 +152,7 @@ export function Modal({ open, onClose, title, children, footer, wide }: {
   }, [open, onClose])
   if (!open) return null
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-[3px]" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-    <div ref={ref} role="dialog" aria-modal="true" aria-label={title} className={`max-h-[90vh] w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} overflow-auto rounded-3xl border border-slate-200 bg-white shadow-[0_40px_100px_-30px_rgba(15,23,42,.4)]`}>
+    <div ref={ref} role="dialog" aria-modal="true" aria-label={title} className={`glass-panel max-h-[90vh] w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} overflow-auto rounded-3xl shadow-[0_40px_100px_-30px_rgba(15,23,42,.4)]`}>
       <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
         <h2 className="text-[15px] font-extrabold tracking-tight text-slate-900">{title}</h2>
         <IconButton label="Close dialog" onClick={onClose}><X size={16} /></IconButton>
@@ -236,14 +236,14 @@ export function ProgressBar({ value, label }: { value: number; label?: string })
 }
 
 export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: T; label: string }[]; value: T; onChange: (value: T) => void }) {
-  return <div role="tablist" className="flex gap-1 overflow-x-auto rounded-xl border border-slate-200/70 bg-slate-100/80 p-1">
+  return <div role="tablist" className="glass-subtle flex gap-1 overflow-x-auto rounded-xl border-slate-200/70 bg-slate-100/60 p-1">
     {tabs.map((tab) => <button
       key={tab.id}
       role="tab"
       aria-selected={value === tab.id}
       type="button"
       onClick={() => onChange(tab.id)}
-      className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-[11.5px] font-bold transition sm:flex-1 sm:min-w-0 ${value === tab.id ? 'bg-white text-blue-700 shadow-[0_1px_3px_rgba(15,23,42,.12)]' : 'text-slate-500 hover:text-slate-700'}`}
+      className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-[11.5px] font-bold transition sm:flex-1 sm:min-w-0 ${value === tab.id ? 'bg-white/95 text-blue-700 shadow-[0_1px_3px_rgba(15,23,42,.12)]' : 'text-slate-500 hover:text-slate-700'}`}
     >{tab.label}</button>)}
   </div>
 }

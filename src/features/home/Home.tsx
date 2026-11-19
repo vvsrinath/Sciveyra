@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ArrowRight, BookOpen, Database, FileImage, FileText, FolderOpen, Grid2X2, HardDrive,
-  Image as ImageIcon, Layers, LineChart, Network, Search, ShieldCheck, Sparkles
+  ArrowRight, BookOpen, Database, FileImage, FileText, FlaskConical, FolderOpen, Grid2X2, HardDrive,
+  Image as ImageIcon, Layers, LineChart, Network, Search, ShieldCheck, Sparkles, WandSparkles
 } from 'lucide-react'
 import { Badge, Card, Spinner } from '../../components/ui'
 import { useApp } from '../../app/AppContext'
@@ -16,7 +16,9 @@ const quickTools = [
   { title: 'Image Studio', desc: 'Crop, adjust and export images', to: '/images', icon: ImageIcon, tint: 'from-emerald-50 to-teal-50 text-emerald-600 ring-emerald-100' },
   { title: 'Vector Studio', desc: 'Trace raster art into SVG', to: '/vector', icon: FileImage, tint: 'from-cyan-50 to-sky-50 text-cyan-600 ring-cyan-100' },
   { title: 'Figure Composer', desc: 'Build multi-panel figures', to: '/figures', icon: Grid2X2, tint: 'from-orange-50 to-amber-50 text-orange-600 ring-orange-100' },
-  { title: 'Research Navigator', desc: 'Search public academic metadata', to: '/navigator', icon: Search, tint: 'from-pink-50 to-rose-50 text-pink-600 ring-pink-100' }
+  { title: 'Reference Finder', desc: 'Search free open-access metadata', to: '/navigator', icon: Search, tint: 'from-pink-50 to-rose-50 text-pink-600 ring-pink-100' },
+  { title: 'Paragraph Rewriter', desc: 'Humanise prose without a paid AI API', to: '/rewriter', icon: WandSparkles, tint: 'from-violet-50 to-purple-50 text-violet-600 ring-violet-100' },
+  { title: 'Feature Tester', desc: 'Run built-in checks across every tool', to: '/tester', icon: FlaskConical, tint: 'from-slate-50 to-blue-50 text-blue-600 ring-blue-100' }
 ]
 
 type Item = { id: string; name: string; kind: string; to: string; updatedAt: string }

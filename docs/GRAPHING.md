@@ -53,11 +53,11 @@ X,Y,Z
 
 | `plotType` | Plotly trace | Required mapping | Notes |
 | --- | --- | --- | --- |
-| `surface` | `surface` | X, Y and Z | `connectgaps: false`, colour bar |
-| `mesh3d` | `mesh3d` | X, Y and Z | triangulates the grid; intensity is Z |
-| `scatter3d` | `scatter3d` | X, Y and Z | one marker per complete row; marker colour is Z |
+| `surface` | `surface` | X, Y and Z | `connectgaps: false`, colour bar, optional XYZ contours, lighting presets, opacity |
+| `mesh3d` | `mesh3d` | X, Y and Z | triangulates the grid; intensity is Z, lighting presets, optional flat shading, opacity |
+| `scatter3d` | `scatter3d` | X, Y and Z | one marker per complete row; marker colour is Z, marker opacity control |
 
-The scene layout always disables the 2D axes, sets `dragmode: orbit` in the studio, applies `showGrid` to all three scene axes and honours `reverseColorscale` for surface, mesh and scatter markers.
+The scene layout always disables the 2D axes, sets `dragmode: orbit` in the studio, applies `showGrid` to all three scene axes and honours `reverseColorscale` for surface, mesh and scatter markers. `surfaceContours`, `surfaceLighting` (`soft`, `glossy`, `matte`, `flat`) and `surfaceOpacity` (0.2–1) are normalised with the config and round-trip through saved JSON.
 
 ## Error bars
 
@@ -87,16 +87,21 @@ Validation warns when an error column has no usable numbers, contains negative v
 | `refLines` | Reference lines | Dashed X or Y rules. |
 | `annotations` | Notes | Free text with optional data coordinates/arrow. |
 | `hiddenSeries` | Legend toggles | Series become `legendonly`, preserving legend visibility. |
+| `surfaceContours` | Contour lines | Draws X/Y/Z contour lines on `surface` traces. |
+| `surfaceLighting` | Lighting | `soft`, `glossy`, `matte` or `flat` for `surface`/`mesh3d`; `flat` enables flat shading. |
+| `surfaceOpacity` | Opacity | 0.2–1 for surfaces/meshes and 3D scatter markers. |
 
 ## Layout and style
 
-`baseLayout` builds a light layout with:
+`baseLayout` builds a light, publication-oriented layout with:
 
-- paper/plot background colours, font family and size;
+- 1000×620 default canvas, paper/plot background colours, font family and size;
 - X/Y titles, optional secondary Y axis, log scales and explicit min/max ranges;
-- grid and zero-line colours, tick formats, optional minor ticks;
-- legend position (top/bottom/left/right/center);
-- reference-line shapes and annotations.
+- thin grid lines drawn below traces, hidden zero lines, outside ticks and optional minor ticks;
+- framed legend, styled hover labels and `.,` separators;
+- reference-line shapes and free/fit annotations.
+
+`buildPlotlyFigure(..., { fitLabel })` adds a non-interactive paper-coordinate annotation carrying the fit name, equation and R² so the chart remains interpretable when exported.
 
 `axisRange` converts min/max values to Plotly ranges and uses `log10` for logarithmic axes. Incomplete ranges fall back to Plotly auto-ranging.
 
@@ -131,7 +136,7 @@ Warnings still render:
 - moving average, min–max normalisation, z-score and numerical derivative previews;
 - linear interpolation.
 
-Regression results can be added as an extra dashed trace.
+Regression results can be added as an extra dashed trace and as an on-chart fit/R² label. Graph Studio and the built-in Feature Tester both verify the label reaches the Plotly layout.
 
 ## Saved graphs and templates
 
@@ -144,7 +149,7 @@ Regression results can be added as an extra dashed trace.
 
 `src/lib/export.js` handles:
 
-- PNG, SVG and raster-embedded PDF through `Plotly.toImage`;
+- PNG, SVG and raster-embedded PDF through `Plotly.toImage`, with scale 3 by default (max 4) in both studios;
 - dataset CSV;
 - graph config JSON (with schema marker) and config import;
 - sending an SVG snapshot to Figure Composer as an asset.
@@ -153,10 +158,11 @@ Regression results can be added as an extra dashed trace.
 
 ## Testing checklist
 
-`tests/graphFeatures.test.js` is the regression suite. When adding a plot type or option:
+`tests/graphFeatures.test.js`, `tests/graphConfig.test.js` and `src/lib/featureTests.js` cover the graph engine. When adding a plot type or option:
 
 1. Add a builder case.
 2. Add validation errors/warnings for unsafe mappings.
 3. Add a test that the trace type, arrays, and layout fields are correct.
-4. Verify in the browser on `/graphs` and `/three-d` at desktop and mobile widths.
-5. Run `npm run typecheck && npm test && npm run build`.
+4. Add a matching check to the in-app Feature Tester when the option is user-facing.
+5. Verify in the browser on `/graphs` and `/three-d` at desktop and mobile widths.
+6. Run `npm run typecheck && npm test && npm run build`.

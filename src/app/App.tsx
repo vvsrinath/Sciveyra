@@ -14,6 +14,8 @@ const DiagramStudio = lazy(() => import('../features/diagram-studio/DiagramStudi
 const ResearchNavigator = lazy(() => import('../features/research/ResearchNavigator'))
 const ReferenceManager = lazy(() => import('../features/research/ReferenceManager'))
 const WritingLab = lazy(() => import('../features/writing-lab/WritingLab'))
+const ParagraphRewriter = lazy(() => import('../features/text-lab/ParagraphRewriter'))
+const FeatureTester = lazy(() => import('../features/testing/FeatureTester'))
 const Projects = lazy(() => import('../features/projects/Projects'))
 const Settings = lazy(() => import('../features/settings/Settings'))
 
@@ -44,6 +46,8 @@ export default function App() {
         <Route path="/navigator" element={<ResearchNavigator />} />
         <Route path="/references" element={<ReferenceManager />} />
         <Route path="/writing" element={<WritingLab />} />
+        <Route path="/rewriter" element={<ParagraphRewriter />} />
+        <Route path="/tester" element={<FeatureTester />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/settings" element={<Settings />} />
       </Route>

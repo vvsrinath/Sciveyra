@@ -18,18 +18,22 @@ describe('defaultConfig', () => {
     expect(config.yKeys).toEqual(['c1'])
     expect(config.zKey).toBe('c2')
     expect(config.plotType).toBe('line')
-    expect(config.width).toBe(900)
+    expect(config.width).toBe(1000)
+    expect(config.height).toBe(620)
     expect(config.fontFamily).toBe('DM Sans')
   })
 
   it('sanitizes invalid numeric and style options', () => {
     const config = normalizeConfig({ width: 99999, height: 'x', fontSize: 'bad', markerShape: 'weird', lineDash: 'zigzag', colors: [] })
     expect(config.width).toBe(4000)
-    expect(config.height).toBe(560)
+    expect(config.height).toBe(620)
     expect(config.fontSize).toBe(13)
     expect(config.markerShape).toBe('circle')
     expect(config.lineDash).toBe('solid')
     expect(config.colors.length).toBeGreaterThan(0)
+    expect(config.surfaceContours).toBe(false)
+    expect(config.surfaceLighting).toBe('soft')
+    expect(config.surfaceOpacity).toBe(1)
   })
 })
 
@@ -99,6 +103,28 @@ describe('buildPlotlyFigure', () => {
     const figure = buildPlotlyFigure(dataset, config)
     expect(figure.layout.shapes).toHaveLength(1)
     expect(figure.layout.annotations[0].text).toBe('Peak')
+  })
+
+  it('places fit equation and R² labels on the chart', () => {
+    const figure = buildPlotlyFigure(dataset, defaultConfig(dataset), {
+      fitLabel: 'Linear fit<br>y = 2.0x + 1.0<br>R² = 0.9876'
+    })
+    const label = figure.layout.annotations.find((annotation) => String(annotation.text).includes('R²'))
+    expect(label).toBeTruthy()
+    expect(label.xref).toBe('paper')
+    expect(label.yref).toBe('paper')
+    expect(label.showarrow).toBe(false)
+    expect(label.text).toContain('y = 2.0x + 1.0')
+  })
+
+  it('uses publication-style axis and legend defaults', () => {
+    const figure = buildPlotlyFigure(dataset, defaultConfig(dataset))
+    expect(figure.layout.xaxis.showline).toBe(true)
+    expect(figure.layout.xaxis.layer).toBe('belowTraces')
+    expect(figure.layout.xaxis.zeroline).toBe(false)
+    expect(figure.layout.hoverlabel.bordercolor).toBeTruthy()
+    expect(figure.layout.legend.borderwidth).toBe(1)
+    expect(figure.layout.separators).toBe('.,')
   })
 })
 

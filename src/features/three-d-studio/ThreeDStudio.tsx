@@ -6,7 +6,7 @@ import { useApp } from '../../app/AppContext'
 import { dbDelete, dbGetAll, dbPut } from '../../lib/storage.js'
 import { numericColumns, parseSpreadsheetFile } from '../../lib/parse.js'
 import { sampleSurfaceDataset } from '../../lib/sampleData.js'
-import { buildPlotlyFigure, COLORSCALES, defaultConfig, normalizeConfig } from '../../lib/graphConfig.js'
+import { buildPlotlyFigure, COLORSCALES, defaultConfig, LIGHTING_PRESETS, normalizeConfig } from '../../lib/graphConfig.js'
 import { exportPlotly } from '../../lib/export.js'
 import { nowIso, slugify, uid } from '../../lib/util.js'
 import type { Dataset, GraphConfig, GraphRecord } from '../../types'
@@ -195,7 +195,7 @@ export default function ThreeDStudio() {
     setExporting(true)
     try {
       await exportPlotly(plotly.Plotly, plotly.div, format, `${slugify(name || config.title || '3d-graph')}.${format}`, {
-        width: config.width, height: config.height, scale: 2, background: config.background
+        width: config.width, height: config.height, scale: 3, background: config.background
       })
       notify(`${format.toUpperCase()} exported. WebGL 3D scenes are rasterised; SVG export is not offered for 3D.`, 'success')
     } catch (error) {
@@ -263,6 +263,19 @@ export default function ThreeDStudio() {
           <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-1">
             <Toggle checked={!!config.showGrid} onChange={(value) => update({ showGrid: value })} label="Grid lines" hint="Show axis grids in the scene" />
             <Toggle checked={!!config.reverseColorscale} onChange={(value) => update({ reverseColorscale: value })} label="Reverse colours" hint="Flip the colour scale direction" />
+          </div>
+
+          <div className="glass-subtle rounded-xl border-slate-200/70 p-3">
+            <div className="mb-2 text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-500">Surface quality</div>
+            {config.plotType === 'surface' && <Toggle checked={!!config.surfaceContours} onChange={(value) => update({ surfaceContours: value })} label="Contour lines" hint="Draw X/Y/Z contours on the surface" />}
+            {config.plotType !== 'scatter3d' && <Field label="Lighting" className="mt-2">
+              <Select value={config.surfaceLighting || 'soft'} onChange={(event) => update({ surfaceLighting: event.target.value as GraphConfig['surfaceLighting'] })} className="h-9">
+                {Object.entries(LIGHTING_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}
+              </Select>
+            </Field>}
+            <Field label={config.plotType === 'scatter3d' ? 'Point opacity' : 'Surface opacity'} hint={`${Math.round((config.surfaceOpacity ?? 1) * 100)}%`} className="mt-2">
+              <input type="range" min={0.2} max={1} step={0.05} value={config.surfaceOpacity ?? 1} onChange={(event) => update({ surfaceOpacity: Number(event.target.value) })} className="h-2 w-full cursor-pointer" aria-label="Surface opacity" />
+            </Field>
           </div>
 
           <div>

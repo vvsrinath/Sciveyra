@@ -6,6 +6,32 @@
   NODE_VERSION = "20"
   NPM_FLAGS = "--legacy-peer-deps"
 
+# Same-origin proxies for public APIs that do not expose browser CORS headers.
+# These are plain URL rewrites: no keys, tokens or secrets are involved.
+[[redirects]]
+  from = "/api/crossref/*"
+  to = "https://api.crossref.org/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/europepmc/*"
+  to = "https://www.ebi.ac.uk/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/arxiv/*"
+  to = "https://export.arxiv.org/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/unpaywall/*"
+  to = "https://api.unpaywall.org/:splat"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

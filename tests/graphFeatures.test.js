@@ -135,6 +135,30 @@ describe('every 3D plot type builds a usable figure', () => {
     expect(figure.data[0].i).toHaveLength(figure.data[0].j.length)
     expect(figure.data[0].i).toHaveLength(figure.data[0].k.length)
   })
+
+  it('applies surface contours, lighting presets and opacity', () => {
+    const figure = buildPlotlyFigure(surface, configFor(surface, {
+      plotType: 'surface', surfaceContours: true, surfaceLighting: 'glossy', surfaceOpacity: 0.65
+    }))
+    const trace = figure.data[0]
+    expect(trace.opacity).toBe(0.65)
+    expect(trace.contours.x.show).toBe(true)
+    expect(trace.contours.y.show).toBe(true)
+    expect(trace.contours.z.show).toBe(true)
+    expect(trace.lighting.specular).toBeGreaterThan(0)
+    expect(trace.lightposition).toBeTruthy()
+
+    const matte = buildPlotlyFigure(surface, configFor(surface, { plotType: 'surface', surfaceLighting: 'matte' }))
+    expect(matte.data[0].lighting.specular).toBeLessThan(trace.lighting.specular)
+    const flatMesh = buildPlotlyFigure(surface, configFor(surface, { plotType: 'mesh3d', surfaceLighting: 'flat' }))
+    expect(flatMesh.data[0].flatshading).toBe(true)
+  })
+
+  it('omits surface contours unless requested', () => {
+    const figure = buildPlotlyFigure(surface, configFor(surface, { plotType: 'surface' }))
+    expect(figure.data[0].contours).toBeUndefined()
+    expect(figure.data[0].opacity).toBe(1)
+  })
 })
 
 describe('error bars', () => {

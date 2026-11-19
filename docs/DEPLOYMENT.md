@@ -25,6 +25,31 @@ npm run preview   # serves dist/ at http://127.0.0.1:4173/
   NODE_VERSION = "20"
   NPM_FLAGS = "--legacy-peer-deps"
 
+# CORS-only proxies for public scholarly APIs. No keys or secrets.
+[[redirects]]
+  from = "/api/crossref/*"
+  to = "https://api.crossref.org/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/europepmc/*"
+  to = "https://www.ebi.ac.uk/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/arxiv/*"
+  to = "https://export.arxiv.org/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/unpaywall/*"
+  to = "https://api.unpaywall.org/:splat"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
@@ -33,12 +58,20 @@ npm run preview   # serves dist/ at http://127.0.0.1:4173/
 
 `.npmrc` also sets `legacy-peer-deps=true`, so the install works whether Netlify uses `npm install` or `npm ci`.
 
-Steps:
+### Connect the GitHub repository in Netlify (no token)
 
-1. Create a Netlify site from the repository.
-2. Keep the base directory at the repository root (the Vite app lives there).
-3. Confirm build command `npm run build` and publish directory `dist`.
-4. Deploy. Netlify installs dependencies and runs the build.
+The deployment is repository-connect only. Do not paste a personal access token into Netlify or the repository.
+
+1. Sign in at <https://app.netlify.com/> and choose **Add new site → Import an existing project**.
+2. Choose **Deploy with GitHub**. If prompted, authorize the Netlify GitHub app for the `vvsrinath/Sciveyra` repository only.
+3. Pick the repository `vvsrinath/Sciveyra`. Do not fork unless you intend to maintain a separate copy.
+4. On the build settings screen leave **Base directory** empty. Set **Build command** to `npm run build` and **Publish directory** to `dist`. Netlify should detect `netlify.toml`; confirm the values shown match it.
+5. Leave **Environment variables** empty. Do not add an API key, GitHub token or Unpaywall email.
+6. Click **Deploy site**. Netlify installs dependencies (using `.npmrc`/`NPM_FLAGS`), runs `npm run build` and publishes `dist/`.
+7. After the first deploy, open **Site configuration → Change site name** if you want a friendly URL. Later pushes to the connected branch trigger deploys automatically.
+8. Verify the site by opening `/`, then `/graphs`, `/three-d`, `/navigator`, `/rewriter` and `/tester` directly. Each should render, not 404.
+
+If Netlify reports a build failure, check the deploy log for the `npm run build` line and reproduce locally with `npm ci && npm run build`. The repository root is the Vite app; there is no separate frontend subdirectory on this branch.
 
 `public/_redirects` duplicates the SPA rewrite for drag-and-drop deploys:
 
@@ -71,9 +104,9 @@ Any static host works if it serves `dist/` and rewrites unknown paths to `index.
 
 ## Environment and secrets
 
-The app needs no environment variables and no server secret. Do not add API keys for paid services; the only outbound calls are user-triggered public scholarly metadata requests (Crossref, DataCite, Europe PMC).
+The app needs no environment variables and no server secret. Do not add API keys for paid services or a GitHub token. Outbound calls are user-triggered public scholarly metadata requests: OpenAlex and DOAJ direct, Crossref/DataCite/Europe PMC/arXiv/Unpaywall through same-origin rewrites where needed. Unpaywall email and optional Ollama endpoint/model are entered in the UI and stored only in the user's browser.
 
-Never commit tokens or credentials. Use your host's secret store if a future integration needs one.
+Never commit tokens or credentials. Repository-connect deployment uses Netlify's GitHub app authorization, not a token in this repository. Use your host's secret store if a future integration needs one.
 
 ## Bundle notes
 
@@ -105,5 +138,8 @@ npm run typecheck && npm test && npm run build
 3. Open `/graphs`; wait for Plotly; switch through all ten 2D types.
 4. Open `/three-d`; switch surface, mesh and scatter; toggle grids and reverse colours.
 5. Import a small CSV, save a graph, reload, and reopen the saved graph.
-6. Export PNG/SVG and download a backup from Settings.
-7. Check the browser console for errors and confirm no horizontal overflow at 390 px width.
+6. Open `/navigator`, choose one or two sources and run a short search. Confirm provider errors are shown honestly if a source is unavailable. Enter your own Unpaywall email only if you want OA enrichment.
+7. Open `/rewriter`, load the example and rewrite locally. Optionally point it at a self-hosted Ollama endpoint; no key is required or stored on the server.
+8. Open `/tester` and confirm all 17 local checks pass in the deployed browser. Export the JSON report if useful.
+9. Export PNG/SVG and download a backup from Settings.
+10. Check the browser console for errors and confirm no horizontal overflow at 390 px width.

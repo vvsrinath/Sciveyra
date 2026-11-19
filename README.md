@@ -12,17 +12,19 @@ Everything runs in the browser. No account, backend, paid API or AI API is requi
 - **Vector Studio** — trace high-contrast raster artwork into sanitised SVG paths with ImageTracerJS, then export or send to Figure Composer.
 - **Figure Composer** — compose multi-panel figures from graph assets, traces, local images and live graph panels, with labels, captions, drag/resize, auto-grid, alignment and PNG/SVG/PDF export.
 - **Diagram Studio** — build flowcharts and schematics with draggable nodes and labelled connections, then export PNG/SVG/PDF.
-- **Research Navigator** — search public metadata from Crossref and Europe PMC, review results and save them to the local reference library.
+- **Reference Finder** — search free scholarly metadata from OpenAlex, DOAJ, Europe PMC / PubMed Central, Crossref and arXiv; resolve OA links with your own Unpaywall email; review and save records. A peer-reviewed bundle queries OpenAlex + DOAJ + Europe PMC + Crossref. Patent/IP and pattern rows link out to external search engines rather than inventing results.
 - **Reference Manager** — add, edit, filter and sort references; import/export BibTeX and RIS; deduplicate; copy formatted citations and in-text citations; resolve a DOI or title to metadata; add a reference from a PDF DOI.
 - **Writing Lab** — Markdown draft editor with autosave, word targets, citation-style-aware insertion, rule-based writing checks and TXT/MD export.
+- **Paragraph Rewriter** — local deterministic humanising/rewriting with protected numbers, units, DOIs, URLs and citations. Optionally use a self-hosted Ollama endpoint/model you supply; no paid AI API or key is required.
+- **Feature Tester** — run 17 in-app checks across datasets, every 2D and 3D graph type, analysis, exports, references, rewriting and browser capabilities; export a JSON report.
 - **Projects** — browse every stored collection, search/filter/sort, open or delete items and inspect storage usage.
 - **Settings** — storage estimate, full JSON backup/restore, one-time legacy import, persistent-storage request and privacy notes.
 
 ## Design
 
-SciVeyra uses one calm **light theme**. The `<html>` element never receives a `dark` class, so every page keeps a white canvas, soft slate borders and readable dark ink. Manrope is used for display headings and DM Sans for body text, with rounded cards, restrained gradient accents and subtle blue/violet/cyan ambient light.
+SciVeyra uses one calm **light theme**. The `<html>` element never receives a `dark` class, so every page keeps a white canvas, soft slate borders and readable dark ink. Cards, headers, sidebars and controls share restrained white glass surfaces (`.glass-panel`, `.glass-subtle`, `.glass-chip`) with a subtle blue-tinted ambient wash. Manrope is used for display headings and DM Sans for body text.
 
-Design tokens live in `tailwind.config.js`; shared primitives live in `src/components/ui.tsx`.
+Design tokens live in `tailwind.config.js`; shared primitives live in `src/components/ui.tsx`; glass effects are defined once in `src/styles/index.css`.
 
 ## Quick start
 
@@ -72,8 +74,10 @@ sciveyra-frontend/
 │   │   ├── vector-studio/    Raster-to-vector tracing
 │   │   ├── figure-composer/  Multi-panel figure layout
 │   │   ├── diagram-studio/   Flowcharts and schematics
-│   │   ├── research/          Metadata search and reference library
+│   │   ├── research/          Multi-source Reference Finder and reference library
 │   │   ├── writing-lab/      Draft editor and citation insertion
+│   │   ├── text-lab/         Local/Ollama paragraph rewriter
+│   │   ├── testing/          Built-in feature tester
 │   │   ├── home/             Dashboard
 │   │   ├── landing/          Public marketing page
 │   │   ├── projects/          Library browser
@@ -101,7 +105,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/GRAPHING.md`](docs/GR
 
 ## Testing
 
-The suite covers parsing, statistics, curve fitting, references, metadata, storage, sample data, graph validation and figure building. Graph tests exercise every 2D type (`line`, `scatter`, `bar`, `area`, `histogram`, `box`, `errorbar`, `heatmap`, `contour`, `spectrum`) and every 3D type (`surface`, `mesh3d`, `scatter3d`), including error-bar alignment and all SigmaPlot-style options.
+The suite covers parsing, statistics, curve fitting, references, multi-source discovery adapters, rewriting, the built-in test runner, storage, sample data, graph validation and figure building. Graph tests exercise every 2D type (`line`, `scatter`, `bar`, `area`, `histogram`, `box`, `errorbar`, `heatmap`, `contour`, `spectrum`) and every 3D type (`surface`, `mesh3d`, `scatter3d`), including error-bar alignment, fit labels, publication defaults and 3D contour/lighting/opacity controls.
 
 ```bash
 npm test
@@ -114,11 +118,11 @@ npm run build
 - Structured data is stored in IndexedDB in the database `sciveyra`.
 - `localStorage` is read once to import data from older prototypes.
 - Backups are plain JSON files exported from Settings. Browser storage is not a backup — export regularly.
-- Research Navigator, DOI/title resolution and PDF DOI recovery contact Crossref, DataCite or Europe PMC directly only when you run an action. No proxy or AI service is used.
+- Reference Finder, DOI/title resolution and PDF DOI recovery contact providers only when you run an action. OpenAlex and DOAJ are direct CORS-safe calls; Crossref, Europe PMC, arXiv and Unpaywall use same-origin Netlify/Vite proxies where needed. No proxy, app server or AI service sees a stored secret; Unpaywall email and optional Ollama settings stay in this browser.
 
 ## Deployment
 
-The app is a static single-page application. A ready-to-use Netlify configuration (`netlify.toml` and `public/_redirects`) builds with `npm run build` and redirects every route to `index.html`. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+The app is a static single-page application. A ready-to-use Netlify configuration (`netlify.toml` and `public/_redirects`) builds with `npm run build`, redirects every route to `index.html`, and maps `/api/*` same-origin paths to public metadata providers so browser CORS restrictions do not break search. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for exact GitHub repo-connect steps.
 
 ## Honest limitations
 
@@ -127,7 +131,10 @@ The app is a static single-page application. A ready-to-use Netlify configuratio
 - Chart PDF export embeds a high-resolution raster image; it is not a native vector PDF. Use SVG for vector workflows.
 - Raster-to-vector tracing suits line art, logos and simple diagrams, not photographs or continuous-tone microscopy.
 - Vector tracing and image processing depend on browser canvas/WebGL support.
-- Online metadata can be incomplete or wrong. Always verify against the publisher record before citing.
+- Online metadata can be incomplete or wrong. Always verify against the publisher record before citing. OpenAlex has a shared free daily budget per network IP; proxies cannot increase that quota.
+- Unpaywall rejects placeholder emails; enter your own address in Reference Finder. Europe PMC/arXiv/Crossref availability depends on the provider and network; source errors are reported without inventing results.
+- IP/patent and pattern rows open external search websites. SciVeyra does not claim to have retrieved or verified those results for you.
+- Optional Ollama rewriting depends on a model you host yourself, browser CORS settings and the model's quality. It can hallucinate; review every change. Local rules are the default.
 - Curve fits use least-squares with numerical gradients; compare candidates by adjusted R² and treat outliers as flags, not errors.
 - Live figure panels require a local Plotly render; if a snapshot fails the placeholder box is kept and a warning is shown.
 - PDF DOI recovery only finds machine-readable DOIs (or one in the filename); scanned PDFs may need the DOI entered manually.

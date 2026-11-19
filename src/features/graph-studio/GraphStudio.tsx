@@ -15,6 +15,7 @@ import { cloneDataset, emptyDataset, numericColumns, parseSpreadsheetFile, retyp
 import { sampleEngineDataset } from '../../lib/sampleData.js'
 import { buildPlotlyFigure, defaultConfig, normalizeConfig, regressionTrace, validateConfig } from '../../lib/graphConfig.js'
 import { downloadDatasetCSV, downloadJSON, downloadText, exportPlotly, readFileAsText, readFileAsDataURL, sanitizeSvg } from '../../lib/export.js'
+import { formatStat } from '../../lib/stats.js'
 import { deepClone, nowIso, slugify, uid } from '../../lib/util.js'
 import type { Asset, Dataset, GraphConfig, GraphRecord } from '../../types'
 
@@ -38,7 +39,7 @@ export default function GraphStudio() {
   const [saveModal, setSaveModal] = useState<SaveModal>({ open: false, name: '' })
   const [exportOpen, setExportOpen] = useState(false)
   const [exportFormat, setExportFormat] = useState<ExportFormat>('png')
-  const [exportScale, setExportScale] = useState('2')
+  const [exportScale, setExportScale] = useState('3')
   const [exporting, setExporting] = useState(false)
   const [fit, setFit] = useState<{ result: Record<string, any>; label: string } | null>(null)
   const [plotly, setPlotly] = useState<{ Plotly: any; div: HTMLDivElement } | null>(null)
@@ -138,10 +139,20 @@ export default function GraphStudio() {
   }, [activeGraphId, config, activeDatasetId])
 
   const validation = useMemo(() => validateConfig(activeDataset, config), [activeDataset, config])
+  const fitLabel = useMemo(() => {
+    if (!fit?.result) return ''
+    const result = fit.result as Record<string, any>
+    const r2 = Number(result.r2)
+    return [
+      fit.label,
+      result.equation ? String(result.equation) : '',
+      Number.isFinite(r2) ? `R² = ${formatStat(r2)}` : ''
+    ].filter(Boolean).join('<br>')
+  }, [fit])
   const figure = useMemo(() => {
     const extraTraces = fit?.result ? [regressionTrace(fit.result, '#ef4444', fit.label)].filter(Boolean) : []
-    return buildPlotlyFigure(activeDataset, config, { dark: false, extraTraces })
-  }, [activeDataset, config, fit])
+    return buildPlotlyFigure(activeDataset, config, { dark: false, extraTraces, fitLabel })
+  }, [activeDataset, config, fit, fitLabel])
   const plotLayout = useMemo(() => ({ ...figure.layout, autosize: true }), [figure.layout])
   const handlePlotReady = useCallback((Plotly: any, div: HTMLDivElement) => {
     setPlotly((current) => current?.Plotly === Plotly && current?.div === div ? current : { Plotly, div })
@@ -338,7 +349,7 @@ export default function GraphStudio() {
       await exportPlotly(plotly.Plotly, plotly.div, exportFormat, filename, {
         width: config.width,
         height: config.height,
-        scale: Math.max(1, Math.min(4, Number(exportScale) || 2)),
+        scale: Math.max(1, Math.min(4, Number(exportScale) || 3)),
         background: config.background
       })
       notify(`${exportFormat.toUpperCase()} exported at ${config.width}×${config.height}.`, 'success')
@@ -528,13 +539,13 @@ export default function GraphStudio() {
             <option value="pdf">PDF (raster embedded)</option>
           </Select>
         </Field>
-        <Field label="PNG/PDF scale" hint="2× is recommended for print previews.">
+        <Field label="PNG/PDF scale" hint="3× is the default for publication previews; 4× for high-resolution posters.">
           <Select value={exportScale} onChange={(event) => setExportScale(event.target.value)} disabled={exportFormat === 'svg'}>
             <option value="1">1×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option>
           </Select>
         </Field>
-        <Field label="Width (px)"><Input type="number" min={320} max={4000} value={config.width} onChange={(event) => updateConfig({ width: Number(event.target.value) || 900 })} /></Field>
-        <Field label="Height (px)"><Input type="number" min={240} max={4000} value={config.height} onChange={(event) => updateConfig({ height: Number(event.target.value) || 560 })} /></Field>
+        <Field label="Width (px)"><Input type="number" min={320} max={4000} value={config.width} onChange={(event) => updateConfig({ width: Number(event.target.value) || 1000 })} /></Field>
+        <Field label="Height (px)"><Input type="number" min={240} max={4000} value={config.height} onChange={(event) => updateConfig({ height: Number(event.target.value) || 620 })} /></Field>
       </div>
       <div className="mt-3 rounded-lg border border-slate-100 p-3 dark:border-slate-800">
         <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Also available</div>

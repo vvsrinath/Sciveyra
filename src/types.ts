@@ -75,6 +75,9 @@ export type GraphConfig = {
   refLines: RefLine[]
   hiddenSeries?: string[]
   fontColor?: string
+  surfaceContours?: boolean
+  surfaceLighting?: 'soft' | 'glossy' | 'matte' | 'flat'
+  surfaceOpacity?: number
 }
 
 export type GraphRecord = {

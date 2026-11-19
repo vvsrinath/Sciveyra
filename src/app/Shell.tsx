@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
-  BookOpen, ChevronRight, FileImage, FileText, FolderOpen, Grid2X2, Home, Image as ImageIcon,
-  Layers, LineChart, Menu, Network, Search, Settings, ShieldCheck, X
+  BookOpen, ChevronRight, FileImage, FileText, FlaskConical, FolderOpen, Grid2X2, Home,
+  Image as ImageIcon, Layers, LineChart, Menu, Network, Search, Settings, ShieldCheck, WandSparkles, X
 } from 'lucide-react'
 import Logo from '../components/Logo'
 import { ToastStack } from '../components/ui'
 import { useApp } from './AppContext'
 
 const groups: { title: string; items: { label: string; to: string; icon: typeof Home }[] }[] = [
-  { title: 'Workspace', items: [{ label: 'Home', to: '/home', icon: Home }, { label: 'Projects', to: '/projects', icon: FolderOpen }] },
+  { title: 'Workspace', items: [{ label: 'Home', to: '/home', icon: Home }, { label: 'Projects', to: '/projects', icon: FolderOpen }, { label: 'Feature Tester', to: '/tester', icon: FlaskConical }] },
   { title: 'Data & graphs', items: [{ label: 'Graph Studio', to: '/graphs', icon: LineChart }, { label: '3D Graph Studio', to: '/three-d', icon: Layers }] },
   { title: 'Visual tools', items: [
     { label: 'Image Studio', to: '/images', icon: ImageIcon },
@@ -18,24 +18,27 @@ const groups: { title: string; items: { label: string; to: string; icon: typeof 
     { label: 'Diagram Studio', to: '/diagrams', icon: Network }
   ] },
   { title: 'Research', items: [
-    { label: 'Research Navigator', to: '/navigator', icon: Search },
+    { label: 'Reference Finder', to: '/navigator', icon: Search },
     { label: 'Reference Manager', to: '/references', icon: BookOpen },
-    { label: 'Writing Lab', to: '/writing', icon: FileText }
+    { label: 'Writing Lab', to: '/writing', icon: FileText },
+    { label: 'Paragraph Rewriter', to: '/rewriter', icon: WandSparkles }
   ] }
 ]
 
 const titles: Record<string, { title: string; section: string }> = {
   '/home': { title: 'Home', section: 'Workspace' },
   '/projects': { title: 'Projects', section: 'Workspace' },
+  '/tester': { title: 'Feature Tester', section: 'Workspace' },
   '/graphs': { title: 'Graph Studio', section: 'Data & graphs' },
   '/three-d': { title: '3D Graph Studio', section: 'Data & graphs' },
   '/images': { title: 'Image Studio', section: 'Visual tools' },
   '/vector': { title: 'Vector Studio', section: 'Visual tools' },
   '/figures': { title: 'Figure Composer', section: 'Visual tools' },
   '/diagrams': { title: 'Diagram Studio', section: 'Visual tools' },
-  '/navigator': { title: 'Research Navigator', section: 'Research' },
+  '/navigator': { title: 'Reference Finder', section: 'Research' },
   '/references': { title: 'Reference Manager', section: 'Research' },
   '/writing': { title: 'Writing Lab', section: 'Research' },
+  '/rewriter': { title: 'Paragraph Rewriter', section: 'Research' },
   '/settings': { title: 'Settings', section: 'Workspace' }
 }
 
@@ -91,7 +94,7 @@ export default function Shell() {
         </>}
       </NavLink>
 
-      <div className="mt-2 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-slate-50 to-blue-50/60 p-3">
+      <div className="glass-subtle mt-2 rounded-2xl border-slate-200/80 bg-gradient-to-br from-white/80 to-blue-50/50 p-3">
         <div className="flex items-center gap-2">
           <span className={`grid h-7 w-7 place-items-center rounded-lg ${storageError ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
             <ShieldCheck size={14} />
@@ -109,10 +112,10 @@ export default function Shell() {
   return <div className="min-h-screen bg-white text-slate-800">
     {mobileOpen && <button type="button" className="fixed inset-0 z-30 bg-slate-900/25 backdrop-blur-sm lg:hidden" onClick={() => setMobileOpen(false)} aria-label="Close navigation overlay" />}
 
-    <aside className={`fixed inset-y-0 left-0 z-40 w-[262px] border-r border-slate-200/80 bg-white transition-transform duration-300 lg:translate-x-0 ${mobileOpen ? 'translate-x-0 shadow-[0_0_60px_rgba(15,23,42,.15)]' : '-translate-x-full'}`}>{sidebar}</aside>
+    <aside className={`glass-panel fixed inset-y-0 left-0 z-40 w-[262px] rounded-none border-y-0 border-l-0 border-r border-slate-200/80 bg-white/80 shadow-none transition-transform duration-300 lg:translate-x-0 ${mobileOpen ? 'translate-x-0 shadow-[0_0_60px_rgba(15,23,42,.15)]' : '-translate-x-full'}`}>{sidebar}</aside>
 
     <div className="min-w-0 lg:pl-[262px]">
-      <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-3 border-b border-slate-200/80 bg-white/85 px-4 backdrop-blur-xl md:px-7">
+      <header className="glass-subtle sticky top-0 z-20 flex h-16 items-center justify-between gap-3 rounded-none border-x-0 border-t-0 border-slate-200/80 bg-white/80 px-4 md:px-7">
         <div className="flex min-w-0 items-center gap-2.5">
           <button type="button" className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 lg:hidden" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu size={19} /></button>
           <div className="hidden items-center gap-2 text-[11px] text-slate-400 sm:flex">
@@ -124,16 +127,16 @@ export default function Shell() {
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[9.5px] font-extrabold uppercase tracking-[0.14em] text-slate-500 md:flex">
+          <span className="glass-chip hidden items-center gap-2 rounded-full border-slate-200 px-3 py-1.5 text-[9.5px] font-extrabold uppercase tracking-[0.14em] text-slate-500 md:flex">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_0_3px_rgba(52,211,153,.18)]" /> Local workspace
           </span>
-          <NavLink to="/settings" className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600" aria-label="Open settings" title="Settings">
+          <NavLink to="/settings" className="glass-chip inline-flex h-9 w-9 items-center justify-center rounded-xl border-slate-200 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600" aria-label="Open settings" title="Settings">
             <Settings size={16} />
           </NavLink>
         </div>
       </header>
 
-      <main className="min-h-[calc(100vh-4rem)] bg-white bg-[radial-gradient(1100px_380px_at_50%_-160px,rgba(219,234,254,.5),rgba(255,255,255,0)_70%)]">
+      <main className="min-h-[calc(100vh-4rem)] bg-transparent">
         <div className="mx-auto w-full max-w-[1560px] px-4 py-6 md:px-7 md:py-8">
           <Outlet />
         </div>
