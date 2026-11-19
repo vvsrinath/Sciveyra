@@ -1,7 +1,7 @@
 import { openDB } from 'idb'
 import { nowIso } from './util.js'
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 export const DB_NAME = 'sciveyra'
 export const STORES = {
   datasets: 'id',
@@ -13,12 +13,30 @@ export const STORES = {
   assets: 'id',
   projects: 'id',
   settings: 'key',
-  meta: 'key'
+  meta: 'key',
+  versions: 'id',
+  searchCache: 'id'
 }
 
 const STORE_NAMES = Object.keys(STORES)
+/** Derived data that can always be rebuilt; never stored in backups. */
+export const VOLATILE_STORES = ['searchCache']
+const HISTORY_STORES = [
+  'datasets', 'graphs', 'figures', 'diagrams', 'drafts', 'references', 'assets', 'projects'
+]
+export const BACKUP_STORES = STORE_NAMES.filter((name) => !VOLATILE_STORES.includes(name))
+const MAX_VERSIONS_PER_RECORD = 12
+const MAX_VERSIONS_TOTAL = 150
+const MAX_SNAPSHOT_BYTES = 250_000
 const LEGACY_PROJECTS = 'sciveyra-projects'
 const LEGACY_REFERENCES = 'sciveyra-references'
+let versionSequence = 0
+
+function compareVersionsDescending(a, b) {
+  return (Number(b.sequence) || 0) - (Number(a.sequence) || 0)
+    || String(b.createdAt).localeCompare(String(a.createdAt))
+    || String(b.id).localeCompare(String(a.id))
+}
 
 let dbPromise = null
 const memory = Object.fromEntries(STORE_NAMES.map((name) => [name, new Map()]))
@@ -51,13 +69,67 @@ export async function dbPut(store, value) {
     : `id_${Math.random().toString(36).slice(2)}`
   const record = { ...value, updatedAt: value.updatedAt || nowIso() }
   if (record.createdAt === undefined) record.createdAt = record.updatedAt
+  await maybeSnapshot(store, keyPath, record)
+  await writeRecord(store, record)
+  return record
+}
+
+async function writeRecord(store, record) {
   if (hasIDB()) {
     const db = await getDB()
     await db.put(store, record)
   } else {
-    memory[store].set(record[keyPath], record)
+    memory[store].set(record[STORES[store]], record)
   }
-  return record
+}
+
+function cloneRecord(value) {
+  if (typeof structuredClone === 'function') return structuredClone(value)
+  return JSON.parse(JSON.stringify(value))
+}
+
+function fingerprint(value) {
+  if (!value || typeof value !== 'object') return ''
+  const { createdAt: _createdAt, updatedAt: _updatedAt, ...content } = value
+  return JSON.stringify(content)
+}
+
+/** Store a bounded "before" image so any saved record can be restored later. */
+async function maybeSnapshot(store, keyPath, nextRecord, { deleted = false } = {}) {
+  if (!HISTORY_STORES.includes(store)) return
+  const previous = await dbGet(store, nextRecord[keyPath])
+  if (!previous) return
+  if (!deleted && fingerprint(previous) === fingerprint(nextRecord)) return
+  const snapshotTime = nowIso()
+  const snapshotRecord = {
+    id: `ver_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`,
+    sequence: ++versionSequence,
+    createdAt: snapshotTime,
+    updatedAt: snapshotTime,
+    store,
+    recordId: String(nextRecord[keyPath]),
+    record: cloneRecord(previous),
+    deleted,
+    reason: deleted ? 'Deleted' : 'Edited'
+  }
+  if (JSON.stringify(snapshotRecord).length > MAX_SNAPSHOT_BYTES) return
+  await writeRecord('versions', snapshotRecord)
+  await pruneVersions(snapshotRecord.store, snapshotRecord.recordId)
+}
+
+async function pruneVersions(store, recordId) {
+  const versions = await dbGetAll('versions')
+  const forRecord = versions
+    .filter((version) => version.store === store && version.recordId === recordId)
+    .sort(compareVersionsDescending)
+  for (const stale of forRecord.slice(MAX_VERSIONS_PER_RECORD)) await dbDelete('versions', stale.id)
+  if (versions.length <= MAX_VERSIONS_TOTAL) return
+  const oldest = versions
+    .slice()
+    .sort((a, b) => -compareVersionsDescending(a, b))
+  for (const stale of oldest.slice(0, versions.length - MAX_VERSIONS_TOTAL)) {
+    await dbDelete('versions', stale.id)
+  }
 }
 
 export async function dbGetAll(store) {
@@ -76,6 +148,10 @@ export async function dbGet(store, key) {
 
 export async function dbDelete(store, key) {
   validateStore(store)
+  if (HISTORY_STORES.includes(store)) {
+    const previous = await dbGet(store, key)
+    if (previous) await maybeSnapshot(store, STORES[store], previous, { deleted: true })
+  }
   if (!hasIDB()) { memory[store].delete(key); return }
   const db = await getDB()
   await db.delete(store, key)
@@ -86,6 +162,38 @@ export async function dbClear(store) {
   if (!hasIDB()) { memory[store].clear(); return }
   const db = await getDB()
   await db.clear(store)
+}
+
+/** Saved "before" images, newest first. Filters are optional. */
+export async function listVersions({ store, recordId, limit } = {}) {
+  let versions = await dbGetAll('versions')
+  if (store) versions = versions.filter((version) => version.store === store)
+  if (recordId) versions = versions.filter((version) => version.recordId === String(recordId))
+  versions.sort(compareVersionsDescending)
+  return Number.isFinite(limit) ? versions.slice(0, Math.max(0, limit)) : versions
+}
+
+export async function getVersion(id) {
+  return dbGet('versions', id)
+}
+
+/** Restore a snapshot into its original collection. The current state is snapshotted first. */
+export async function restoreVersion(id) {
+  const version = await getVersion(id)
+  if (!version) throw new Error('That version is no longer available.')
+  if (!HISTORY_STORES.includes(version.store)) throw new Error('This version cannot be restored automatically.')
+  const keyPath = STORES[version.store]
+  const record = cloneRecord(version.record)
+  if (!record || typeof record !== 'object' || !record[keyPath]) throw new Error('The saved version is incomplete.')
+  return dbPut(version.store, record)
+}
+
+export async function deleteVersion(id) {
+  await dbDelete('versions', id)
+}
+
+export async function clearHistory() {
+  await dbClear('versions')
 }
 
 /**
@@ -111,7 +219,7 @@ function validateStore(store) {
 
 export async function exportBackup() {
   const data = {}
-  for (const store of STORE_NAMES) data[store] = await dbGetAll(store)
+  for (const store of BACKUP_STORES) data[store] = await dbGetAll(store)
   return {
     app: 'SciVeyra',
     schemaVersion: SCHEMA_VERSION,
@@ -132,7 +240,7 @@ export async function importBackup(payload, { mode = 'replace' } = {}) {
   if (!data || typeof data !== 'object') throw new Error('Backup does not contain a data object.')
 
   const counts = {}
-  for (const store of STORE_NAMES) {
+  for (const store of BACKUP_STORES) {
     const records = data[store]
     if (records === undefined) continue
     if (!Array.isArray(records)) throw new Error(`Backup field "${store}" must be a list.`)
@@ -146,7 +254,10 @@ export async function importBackup(payload, { mode = 'replace' } = {}) {
       return JSON.parse(JSON.stringify(record))
     })
     if (mode === 'replace') await dbClear(store)
-    for (const record of clean) await dbPut(store, record)
+    for (const record of clean) {
+      await dbPut(store, record)
+      if (store === 'versions' && Number(record.sequence) > versionSequence) versionSequence = Number(record.sequence)
+    }
     counts[store] = clean.length
   }
   await setSetting('schemaVersion', SCHEMA_VERSION)

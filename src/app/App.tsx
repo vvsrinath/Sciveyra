@@ -17,6 +17,7 @@ const WritingLab = lazy(() => import('../features/writing-lab/WritingLab'))
 const ParagraphRewriter = lazy(() => import('../features/text-lab/ParagraphRewriter'))
 const FeatureTester = lazy(() => import('../features/testing/FeatureTester'))
 const Projects = lazy(() => import('../features/projects/Projects'))
+const VersionHistory = lazy(() => import('../features/history/VersionHistory'))
 const Settings = lazy(() => import('../features/settings/Settings'))
 
 function ScrollToTop() {
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="/rewriter" element={<ParagraphRewriter />} />
         <Route path="/tester" element={<FeatureTester />} />
         <Route path="/projects" element={<Projects />} />
+        <Route path="/history" element={<VersionHistory />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/home" replace />} />

@@ -4,6 +4,7 @@ import { migrateLegacyData } from '../lib/storage.js'
 
 type ToastTone = 'success' | 'error' | 'info' | 'warning'
 export type Toast = { id: string; message: string; tone: ToastTone }
+export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
 type AppContextValue = {
   /** SciVeyra ships a single, calm light theme. Kept for API compatibility. */
@@ -19,6 +20,8 @@ type AppContextValue = {
   bumpRefresh: () => void
   lastSavedAt: string | null
   markSaved: () => void
+  saveStatus: SaveStatus
+  setSaveStatus: (status: SaveStatus) => void
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -37,6 +40,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [storageError, setStorageError] = useState('')
   const [refreshToken, setRefreshToken] = useState(0)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const timers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const dismissToast = useCallback((id: string) => {
@@ -97,8 +101,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     refreshToken,
     bumpRefresh,
     lastSavedAt,
-    markSaved
-  }), [setTheme, toggleTheme, toasts, notify, dismissToast, storageReady, storageError, refreshToken, bumpRefresh, lastSavedAt, markSaved])
+    markSaved,
+    saveStatus,
+    setSaveStatus
+  }), [setTheme, toggleTheme, toasts, notify, dismissToast, storageReady, storageError, refreshToken, bumpRefresh, lastSavedAt, markSaved, saveStatus])
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }

@@ -81,6 +81,12 @@ If Netlify reports a build failure, check the deploy log for the `npm run build`
 
 Deep links such as `/graphs` and `/three-d` therefore work on refresh.
 
+## Offline support (PWA)
+
+The production build registers a hand-written `public/sw.js` (only when `import.meta.env.PROD` is true, so local HMR is unaffected). It precaches the app shell (`/`, `/index.html`, `/favicon.svg`, `/manifest.webmanifest` and the icons), serves hashed `/assets/*` cache-first, and uses a network-first strategy for navigations with the cached shell as the offline fallback. SPA rewrites are untouched: deep links still resolve to `index.html` on refresh.
+
+Only same-origin static assets are cached, and only for GET requests. `/api/*` metadata rewrites, cross-origin metadata providers, Ollama endpoints and non-GET requests are never cached. User data stays in IndexedDB and is never written to the service worker cache. Netlify headers keep `sw.js` and `index.html` revalidated, mark `/assets/*` immutable, and serve the manifest as `application/manifest+json`.
+
 ## Validate the Netlify build locally
 
 The configuration can be exercised without a Netlify account:

@@ -127,6 +127,36 @@ function restoreSensitive(text, tokens) {
   return String(text).replace(new RegExp(`${TOKEN_OPEN}(\\d+)${TOKEN_CLOSE}`, 'g'), (_, index) => tokens[Number(index)] ?? '')
 }
 
+function protectedTokens(text) {
+  return String(text || '').match(new RegExp(SENSITIVE_RE.source, 'gi')) || []
+}
+
+function tokenCounts(values) {
+  const counts = new Map()
+  for (const value of values) counts.set(value, (counts.get(value) || 0) + 1)
+  return counts
+}
+
+/**
+ * Verify that a model rewrite kept every protected value and invented none.
+ * Used before accepting inline suggestions; prompt instructions alone are not enough.
+ */
+export function verifyProtectedTokens(original, rewritten) {
+  const before = tokenCounts(protectedTokens(original))
+  const after = tokenCounts(protectedTokens(rewritten))
+  const missing = []
+  const unexpected = []
+  for (const [value, count] of before) {
+    const shortage = count - (after.get(value) || 0)
+    for (let index = 0; index < shortage; index++) missing.push(value)
+  }
+  for (const [value, count] of after) {
+    const excess = count - (before.get(value) || 0)
+    for (let index = 0; index < excess; index++) unexpected.push(value)
+  }
+  return { valid: missing.length === 0 && unexpected.length === 0, missing, unexpected }
+}
+
 function applyRules(sentence, preset) {
   let output = sentence
   const rules = preset === 'academic' ? CORE_RULES : [...CORE_RULES, ...EXTRA_RULES]
@@ -270,6 +300,9 @@ export function buildOllamaPrompt(text, preset = 'natural') {
     '- Do not invent facts, citations, references or experimental results.',
     '- Keep the original language and technical meaning.',
     '- Return only the rewritten paragraph, with no preface or commentary.',
+    String(text || '').includes(TOKEN_OPEN)
+      ? '- Private-use markers such as the brackets around protected values are placeholders; keep every marker and its number exactly.'
+      : '',
     '',
     'PARAGRAPH:',
     String(text || '').trim()
@@ -290,13 +323,14 @@ export async function rewriteWithOllama(text, options = {}, fetchImpl = globalTh
   const endpoint = normalizeEndpoint(options.endpoint)
   const model = String(options.model || DEFAULT_OLLAMA_MODEL).trim()
   if (!model) throw new Error('Enter an Ollama model name.')
+  const protectedSource = protectSensitive(source)
   const response = await fetchImpl(`${endpoint}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     signal: options.signal,
     body: JSON.stringify({
       model,
-      prompt: buildOllamaPrompt(source, options.preset),
+      prompt: buildOllamaPrompt(protectedSource.text, options.preset),
       stream: false,
       format: 'text',
       options: { temperature: 0.3, top_p: 0.9 }
@@ -304,7 +338,16 @@ export async function rewriteWithOllama(text, options = {}, fetchImpl = globalTh
   })
   if (!response.ok) throw new Error(`Ollama returned ${response.status}. Check that the endpoint is reachable and CORS allows this origin.`)
   const payload = await response.json()
-  const output = String(payload?.response || payload?.message?.content || '').trim()
-  if (!output) throw new Error('Ollama returned an empty rewrite. Try another model or prompt.')
+  const rawOutput = String(payload?.response || payload?.message?.content || '').trim()
+  if (!rawOutput) throw new Error('Ollama returned an empty rewrite. Try another model or prompt.')
+  const output = cleanup(restoreSensitive(rawOutput, protectedSource.tokens))
+  const check = verifyProtectedTokens(source, output)
+  if (!check.valid) {
+    const details = [
+      check.missing.length ? `missing: ${check.missing.join(', ')}` : '',
+      check.unexpected.length ? `unexpected: ${check.unexpected.join(', ')}` : ''
+    ].filter(Boolean).join('; ')
+    throw new Error(`The model changed protected values (${details}). This rewrite was rejected.`)
+  }
   return output
 }

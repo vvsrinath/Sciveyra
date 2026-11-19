@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  SCHEMA_VERSION, STORES, clearAllData, dbClear, dbDelete, dbGet, dbGetAll,
-  dbPut, exportBackup, getSetting, importBackup, setSetting
+  SCHEMA_VERSION, STORES, clearAllData, clearHistory, dbClear, dbDelete, dbGet, dbGetAll,
+  dbPut, exportBackup, getSetting, importBackup, listVersions, restoreVersion, setSetting
 } from '../src/lib/storage.js'
 
 const stores = Object.keys(STORES)
+const backupStores = stores.filter((store) => store !== 'searchCache')
 
 beforeEach(async () => {
   for (const store of stores) await dbClear(store)
@@ -44,7 +45,8 @@ describe('backup and restore', () => {
     const backup = await exportBackup()
     expect(backup.app).toBe('SciVeyra')
     expect(backup.schemaVersion).toBe(SCHEMA_VERSION)
-    expect(Object.keys(backup.data)).toEqual(stores)
+    expect(Object.keys(backup.data)).toEqual(backupStores)
+    expect(backup.data.searchCache).toBeUndefined()
     expect(backup.data.datasets).toHaveLength(1)
     expect(backup.data.references).toHaveLength(1)
   })
@@ -74,14 +76,54 @@ describe('backup and restore', () => {
   })
 })
 
+describe('version history', () => {
+  it('snapshots the previous state and can restore it', async () => {
+    const created = await dbPut('drafts', { id: 'd1', title: 'Original', content: 'One' })
+    await dbPut('drafts', { ...created, title: 'Revised', content: 'Two' })
+    const versions = await listVersions({ store: 'drafts', recordId: 'd1' })
+    expect(versions).toHaveLength(1)
+    expect(versions[0].createdAt).toBeTruthy()
+    expect(versions[0].record.title).toBe('Original')
+    await restoreVersion(versions[0].id)
+    expect((await dbGet('drafts', 'd1')).title).toBe('Original')
+  })
+
+  it('does not duplicate identical saves and caps snapshots per record', async () => {
+    const created = await dbPut('drafts', { id: 'd2', title: 'Original', content: 'One' })
+    await dbPut('drafts', { ...created, createdAt: created.createdAt })
+    expect(await listVersions({ store: 'drafts', recordId: 'd2' })).toHaveLength(0)
+    for (let index = 0; index < 15; index++) {
+      await dbPut('drafts', { id: 'd2', title: `Revision ${index}`, content: `Text ${index}` })
+    }
+    const versions = await listVersions({ store: 'drafts', recordId: 'd2' })
+    expect(versions).toHaveLength(12)
+    expect(versions[0].record.title).toBe('Revision 13')
+  })
+
+  it('snapshots deletions and excludes version history from volatile backup data', async () => {
+    await dbPut('references', { id: 'r1', title: 'Paper' })
+    await dbPut('searchCache', { id: 'search_1', key: 'ignored' })
+    await dbDelete('references', 'r1')
+    const versions = await listVersions({ store: 'references' })
+    expect(versions).toHaveLength(1)
+    expect(versions[0].deleted).toBe(true)
+    expect((await exportBackup()).data.versions).toHaveLength(1)
+    expect((await exportBackup()).data.searchCache).toBeUndefined()
+    await clearHistory()
+    expect(await listVersions()).toHaveLength(0)
+  })
+})
+
 describe('clearing data', () => {
-  it('clears research collections but keeps settings', async () => {
+  it('clears research collections and derived caches but keeps settings', async () => {
     await dbPut('datasets', { id: 'ds_1', name: 'Dataset' })
     await dbPut('drafts', { id: 'draft_1', title: 'Draft' })
+    await dbPut('searchCache', { id: 'search_1', key: 'ignored' })
     await setSetting('theme', 'dark')
     await clearAllData()
     expect(await dbGetAll('datasets')).toHaveLength(0)
     expect(await dbGetAll('drafts')).toHaveLength(0)
+    expect(await dbGetAll('searchCache')).toHaveLength(0)
     expect(await getSetting('theme')).toBe('dark')
   })
 })

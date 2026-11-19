@@ -12,13 +12,15 @@ Everything runs in the browser. No account, backend, paid API or AI API is requi
 - **Vector Studio** — trace high-contrast raster artwork into sanitised SVG paths with ImageTracerJS, then export or send to Figure Composer.
 - **Figure Composer** — compose multi-panel figures from graph assets, traces, local images and live graph panels, with labels, captions, drag/resize, auto-grid, alignment and PNG/SVG/PDF export.
 - **Diagram Studio** — build flowcharts and schematics with draggable nodes and labelled connections, then export PNG/SVG/PDF.
-- **Reference Finder** — search free scholarly metadata from OpenAlex, DOAJ, Europe PMC / PubMed Central, Crossref and arXiv; resolve OA links with your own Unpaywall email; review and save records. A peer-reviewed bundle queries OpenAlex + DOAJ + Europe PMC + Crossref. Patent/IP and pattern rows link out to external search engines rather than inventing results.
+- **Reference Finder** — search free scholarly metadata from OpenAlex, DOAJ, Europe PMC / PubMed Central, Crossref and arXiv; resolve OA links with your own Unpaywall email; review and save records. A peer-reviewed bundle queries OpenAlex + DOAJ + Europe PMC + Crossref. Cached results are labelled fresh/stale with per-source health; refresh bypasses the local cache. Patent/IP and pattern rows link out to external search engines rather than inventing results.
 - **Reference Manager** — add, edit, filter and sort references; import/export BibTeX and RIS; deduplicate; copy formatted citations and in-text citations; resolve a DOI or title to metadata; add a reference from a PDF DOI.
-- **Writing Lab** — Markdown draft editor with autosave, word targets, citation-style-aware insertion, rule-based writing checks and TXT/MD export.
+- **Writing Lab** — Markdown draft editor with debounced autosave, undo/redo, word targets, citation-style-aware insertion, rule-based writing checks, selection-scoped inline rewrites with per-change accept/reject, and TXT/MD export.
 - **Paragraph Rewriter** — local deterministic humanising/rewriting with protected numbers, units, DOIs, URLs and citations. Optionally use a self-hosted Ollama endpoint/model you supply; no paid AI API or key is required.
 - **Feature Tester** — run 17 in-app checks across datasets, every 2D and 3D graph type, analysis, exports, references, rewriting and browser capabilities; export a JSON report.
 - **Projects** — browse every stored collection, search/filter/sort, open or delete items and inspect storage usage.
-- **Settings** — storage estimate, full JSON backup/restore, one-time legacy import, persistent-storage request and privacy notes.
+- **Version History** — review bounded local snapshots created before edits and deletions, filter by collection, and restore a previous state without losing the current one.
+- **Settings** — storage estimate, full JSON backup/restore, one-time legacy import, persistent-storage request and privacy notes. The volatile Reference Finder cache is excluded from backups and totals.
+- **Offline / PWA** — installable light-theme app shell with offline route fallback. Same-origin static assets are cached; `/api/*`, Ollama and user data are never cached by the service worker.
 
 ## Design
 

@@ -6,7 +6,7 @@ import {
 import { Badge, Button, Callout, Card, PageHeader } from '../../components/ui'
 import { useApp } from '../../app/AppContext'
 import {
-  clearAllData, exportBackup, importBackup, migrateLegacyData, storageEstimate
+  clearAllData, exportBackup, importBackup, migrateLegacyData, SCHEMA_VERSION, storageEstimate
 } from '../../lib/storage.js'
 import { downloadJSON, readFileAsText } from '../../lib/export.js'
 import { formatBytes, nowIso } from '../../lib/util.js'
@@ -120,7 +120,8 @@ export default function Settings() {
     }
   }
 
-  const totalRecords = Object.entries(counts).filter(([store]) => !['settings', 'meta'].includes(store)).reduce((sum, [, value]) => sum + value, 0)
+  const countedStores = Object.entries(counts).filter(([store]) => !['settings', 'meta', 'searchCache'].includes(store))
+  const totalRecords = countedStores.reduce((sum, [, value]) => sum + value, 0)
 
   return <div>
     <PageHeader eyebrow="Preferences" title="Settings" description="Control local data, backups and privacy for this browser-only workspace."
@@ -131,14 +132,14 @@ export default function Settings() {
       <div className="space-y-3">
         <Card className="p-4">
           <h2 className="flex items-center gap-2 text-sm font-extrabold text-slate-800 dark:text-slate-100"><HardDrive size={16} className="text-blue-500" />Local storage</h2>
-          <p className="mt-1 text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">Your work is stored in this browser's IndexedDB. Clearing site data, using private windows, or changing devices can remove it.</p>
+          <p className="mt-1 text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">Your work is stored in this browser's IndexedDB. Clearing site data, using private windows, or changing devices can remove it. The Reference Finder search cache is temporary and excluded from these totals and backups.</p>
           <div className="mt-3 flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
             <div><div className="text-[11px] font-bold text-slate-700 dark:text-slate-200">{totalRecords.toLocaleString()} saved records</div><div className="text-[9.5px] text-slate-400">{usage ? `${formatBytes(usage.usage)} used` : 'Storage estimate unavailable'}{persisted === true ? ' · persistent' : persisted === false ? ' · best-effort' : ''}</div></div>
             <Badge tone={storageError ? 'amber' : 'green'}>{storageError ? 'fallback' : 'IndexedDB'}</Badge>
           </div>
           {usage && <div className="mt-2"><div className="flex justify-between text-[9px] text-slate-400"><span>Usage</span><span>{formatBytes(usage.quota)} quota</span></div><div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, (usage.usage / Math.max(1, usage.quota)) * 100)}%` }} /></div></div>}
           <div className="mt-3 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-            {Object.entries(counts).filter(([store]) => !['settings', 'meta'].includes(store)).map(([store, value]) => <div key={store} className="rounded-md border border-slate-100 p-2 dark:border-slate-800"><div className="text-sm font-extrabold text-slate-700 dark:text-slate-200">{value}</div><div className="text-[9px] uppercase tracking-wide text-slate-400">{store}</div></div>)}
+            {countedStores.map(([store, value]) => <div key={store} className="rounded-md border border-slate-100 p-2 dark:border-slate-800"><div className="text-sm font-extrabold text-slate-700 dark:text-slate-200">{value}</div><div className="text-[9px] uppercase tracking-wide text-slate-400">{store}</div></div>)}
           </div>
           <div className="mt-3 flex flex-wrap gap-1.5">
             <Button size="sm" variant="secondary" onClick={() => restoreRef.current?.click()} disabled={busy === 'restore'} icon={<Upload size={12} />}>{busy === 'restore' ? 'Restoring…' : 'Restore backup'}</Button>
@@ -173,14 +174,14 @@ export default function Settings() {
         <Card className="p-4">
           <h2 className="text-sm font-extrabold text-slate-800 dark:text-slate-100">About this build</h2>
           <dl className="mt-2 space-y-1.5 text-[10px]">
-            {[['Application', 'SciVeyra research workspace'], ['Version', '0.1.0 · local-first frontend'], ['Storage schema', 'IndexedDB v1'], ['Deployment', 'Static SPA (Netlify-compatible)'], ['Charting', 'Plotly.js (open source)'], ['Spreadsheets', 'PapaParse + ExcelJS']].map(([label, value]) => <div key={label} className="flex justify-between gap-3 border-b border-slate-100 pb-1.5 last:border-0 dark:border-slate-800"><dt className="text-slate-400">{label}</dt><dd className="text-right font-semibold text-slate-600 dark:text-slate-300">{value}</dd></div>)}
+            {[['Application', 'SciVeyra research workspace'], ['Version', '0.1.0 · local-first frontend'], ['Storage schema', `IndexedDB v${SCHEMA_VERSION}`], ['Deployment', 'Static SPA (Netlify-compatible)'], ['Charting', 'Plotly.js (open source)'], ['Spreadsheets', 'PapaParse + ExcelJS']].map(([label, value]) => <div key={label} className="flex justify-between gap-3 border-b border-slate-100 pb-1.5 last:border-0 dark:border-slate-800"><dt className="text-slate-400">{label}</dt><dd className="text-right font-semibold text-slate-600 dark:text-slate-300">{value}</dd></div>)}
           </dl>
           <Callout tone="info">This build does not claim to validate, peer-review or scientifically certify any analysis. Check methods against your field's standards.</Callout>
         </Card>
 
         <Card className="p-4">
           <h2 className="text-sm font-extrabold text-slate-800 dark:text-slate-100">Backup contents</h2>
-          <p className="mt-1 text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">A backup is a JSON file containing all local collections, including datasets, graph settings, figure layouts, diagrams, drafts, references and exported assets. Keep it private — it may contain unpublished research.</p>
+          <p className="mt-1 text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">A backup is a JSON file containing saved collections such as datasets, graphs, figures, diagrams, drafts, references, settings and assets. Volatile search-cache entries are excluded. Keep it private — it may contain unpublished research.</p>
           <Button className="mt-2" size="sm" variant="secondary" onClick={backup} disabled={busy === 'backup'} icon={<ArrowDownToLine size={12} />}>Download JSON backup</Button>
         </Card>
       </div>

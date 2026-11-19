@@ -57,11 +57,13 @@ Unknown paths redirect to `/home`. Netlify rewrites all paths to `index.html` so
 
 ## State and storage
 
-- `AppProvider` (`src/app/AppContext.tsx`) exposes `notify`, `markSaved`, the toast stack and a `refreshKey` counter used to refresh aggregate views.
-- Each studio loads its own records on mount with `dbGetAll`.
-- IndexedDB is accessed through `idb` in `src/lib/storage.js`. The database is `sciveyra`, schema version `1`.
-- Stores: `datasets`, `graphs`, `figures`, `diagrams`, `drafts`, `references`, `assets`, `projects`, `settings`, `meta`.
-- `dbPut` adds `updatedAt`/`createdAt` when missing. `exportBackup` and `importBackup` move the whole database as JSON.
+- `AppProvider` (`src/app/AppContext.tsx`) exposes `notify`, `markSaved`, save status, the toast stack and a `refreshToken` counter used to refresh aggregate views.
+- Each studio loads its own records on mount with `dbGetAll`. The reusable `useAutosave` hook debounces writes and reports status through `AppProvider`.
+- IndexedDB is accessed through `idb` in `src/lib/storage.js`. The database is `sciveyra`, schema version `2`.
+- Stores: `datasets`, `graphs`, `figures`, `diagrams`, `drafts`, `references`, `assets`, `projects`, `settings`, `meta`, `versions`, `searchCache`.
+- `dbPut` adds `updatedAt`/`createdAt` when missing and saves a bounded "before" image to `versions` for user records. `listVersions`, `restoreVersion`, `deleteVersion` and `clearHistory` power the Version History page. Writing Lab also keeps an in-session undo/redo stack via `src/lib/history.js`.
+- `searchCache` is volatile derived data: it is excluded from backups, cleared with local data and not counted in Settings totals. Reference Finder stores pre-Unpaywall results there and labels cached/stale results in the UI.
+- `exportBackup` and `importBackup` move durable collections (including version history) as JSON.
 - Graph records carry an optional `mode` of `'2d' | '3d'`. Graph Studio filters to `mode !== '3d'`; 3D Studio filters to `mode === '3d'`, so the two studios never show each other's saved scenes.
 - Older records without `mode` are treated as 2D.
 

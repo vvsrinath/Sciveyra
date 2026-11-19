@@ -1,41 +1,73 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowDownToLine, BookOpen, Check, Copy, FileText, Plus, Save, ShieldCheck, Sparkles, Trash2, TriangleAlert
+  ArrowDownToLine, BookOpen, Check, Copy, FileText, Plus, Redo2, Save, ShieldCheck,
+  Sparkles, Trash2, TriangleAlert, Undo2, WandSparkles, X
 } from 'lucide-react'
 import { Badge, Button, Callout, Card, Field, Input, PageHeader, ProgressBar, Select, Spinner } from '../../components/ui'
 import { useApp } from '../../app/AppContext'
-import { dbDelete, dbGetAll, dbPut } from '../../lib/storage.js'
+import { useAutosave } from '../../app/useAutosave'
+import { dbDelete, dbGetAll, dbPut, getSetting, setSetting } from '../../lib/storage.js'
 import { analyzeDraft, readabilityLabel } from '../../lib/writing.js'
 import { inlineCitation, formatCitation, CITATION_STYLES } from '../../lib/references.js'
 import { copyText, downloadText } from '../../lib/export.js'
 import { nowIso, uid } from '../../lib/util.js'
+import { canRedo, canUndo, emptyEditStack, initialEditStack, pushEdit, redoStack, undoStack } from '../../lib/history.js'
+import { applyRewriteDecisions, buildRewriteDiff, summarizeRewriteDiff } from '../../lib/rewriteDiff.js'
+import {
+  analyzeParagraph, DEFAULT_OLLAMA_ENDPOINT, DEFAULT_OLLAMA_MODEL, normalizeEndpoint,
+  REWRITE_PRESETS, rewriteParagraph, rewriteWithOllama, summarizeChanges
+} from '../../lib/rewriter.js'
 import type { DraftRecord, Reference } from '../../types'
+
+type RewriteEngine = 'local' | 'ollama'
+type SelectionSpan = { start: number; end: number; text: string }
+type RewriteSuggestion = {
+  selection: SelectionSpan
+  engine: RewriteEngine
+  preset: string
+  original: string
+  rewritten: string
+  diff: ReturnType<typeof buildRewriteDiff>
+  createdAt: string
+}
+type EditStack = ReturnType<typeof emptyEditStack>
 
 function newDraft(): DraftRecord {
   return { id: uid('draft'), title: 'Untitled draft', content: '', createdAt: nowIso(), updatedAt: nowIso() }
 }
 
 export default function WritingLab() {
-  const { notify, refreshToken, bumpRefresh, markSaved } = useApp()
+  const { notify, refreshToken, bumpRefresh, markSaved, saveStatus } = useApp()
   const [drafts, setDrafts] = useState<DraftRecord[]>([])
   const [active, setActive] = useState<DraftRecord | null>(null)
   const [references, setReferences] = useState<Reference[]>([])
   const [loading, setLoading] = useState(true)
-  const [dirty, setDirty] = useState(false)
+  const [editStack, setEditStack] = useState<EditStack>(emptyEditStack())
   const [target, setTarget] = useState('1000')
   const [citationId, setCitationId] = useState('')
   const [citationStyle, setCitationStyle] = useState('APA 7')
+  const [selection, setSelection] = useState<SelectionSpan | null>(null)
+  const [rewriteEngine, setRewriteEngine] = useState<RewriteEngine>('local')
+  const [rewritePreset, setRewritePreset] = useState('natural')
+  const [endpoint, setEndpoint] = useState(DEFAULT_OLLAMA_ENDPOINT)
+  const [model, setModel] = useState(DEFAULT_OLLAMA_MODEL)
+  const [suggestion, setSuggestion] = useState<RewriteSuggestion | null>(null)
+  const [decisions, setDecisions] = useState<Record<string, boolean>>({})
+  const [rewriteBusy, setRewriteBusy] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const activeRef = useRef<DraftRecord | null>(null)
+  const rewriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   activeRef.current = active
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
-        const [draftList, referenceList] = await Promise.all([
+        const [draftList, referenceList, storedEndpoint, storedModel] = await Promise.all([
           dbGetAll('drafts') as Promise<DraftRecord[]>,
-          dbGetAll('references') as Promise<Reference[]>
+          dbGetAll('references') as Promise<Reference[]>,
+          getSetting('ollamaEndpoint', DEFAULT_OLLAMA_ENDPOINT) as Promise<string>,
+          getSetting('ollamaModel', DEFAULT_OLLAMA_MODEL) as Promise<string>
         ])
         if (cancelled) return
         const sorted = draftList.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
@@ -43,6 +75,8 @@ export default function WritingLab() {
         setReferences(referenceList)
         setActive(sorted[0] || null)
         if (referenceList[0]) setCitationId(referenceList[0].id)
+        if (storedEndpoint) setEndpoint(storedEndpoint)
+        if (storedModel) setModel(storedModel)
       } catch (error) {
         notify(error instanceof Error ? error.message : 'Drafts could not be loaded.', 'error')
       } finally {
@@ -53,13 +87,37 @@ export default function WritingLab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshToken])
 
+  useEffect(() => {
+    setEditStack(initialEditStack(active))
+    setSelection(null)
+    setSuggestion(null)
+    setDecisions({})
+    // Re-seed only when switching drafts; edits keep their own stack.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id])
+
+  useEffect(() => () => {
+    if (rewriteTimer.current) clearTimeout(rewriteTimer.current)
+  }, [])
+
+  const { pending: autosavePending } = useAutosave(active, {
+    delay: 700,
+    enabled: Boolean(active && !loading),
+    serialize: (draft) => JSON.stringify(draft),
+    onSave: async (draft) => {
+      if (!draft) return
+      await dbPut('drafts', draft)
+      setDrafts((current) => [draft, ...current.filter((item) => item.id !== draft.id)]
+        .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')))
+    }
+  })
+
   const createDraft = async () => {
     try {
       const draft = newDraft()
       await dbPut('drafts', draft)
       setDrafts((current) => [draft, ...current])
       setActive(draft)
-      setDirty(false)
       bumpRefresh()
       setTimeout(() => textareaRef.current?.focus(), 50)
     } catch (error) {
@@ -69,7 +127,14 @@ export default function WritingLab() {
 
   const updateActive = (patch: Partial<DraftRecord>) => {
     setActive((current) => current ? { ...current, ...patch, updatedAt: nowIso() } : current)
-    setDirty(true)
+  }
+
+  const applyEdit = (field: string, patch: Partial<DraftRecord>) => {
+    const current = activeRef.current
+    if (!current) return
+    const next = { ...current, ...patch, updatedAt: nowIso() }
+    setEditStack((stack) => pushEdit(stack, next, { field }))
+    setActive(next)
   }
 
   const saveDraft = async (silent = false) => {
@@ -77,43 +142,63 @@ export default function WritingLab() {
     if (!draft) return
     try {
       await dbPut('drafts', draft)
-      setDrafts((current) => [draft, ...current.filter((item) => item.id !== draft.id)].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')))
-      setDirty(false)
+      setDrafts((current) => [draft, ...current.filter((item) => item.id !== draft.id)]
+        .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')))
       markSaved()
-      if (!silent) { bumpRefresh(); notify('Draft saved locally.', 'success') }
+      if (!silent) notify('Draft saved locally.', 'success')
     } catch (error) {
       if (!silent) notify(error instanceof Error ? error.message : 'The draft could not be saved.', 'error')
     }
   }
 
-  useEffect(() => {
-    if (!dirty || !active) return
-    const timer = setTimeout(() => { saveDraft(true) }, 900)
-    return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, dirty])
+  const applySnapshot = (snapshot: DraftRecord | null) => {
+    if (!snapshot) return
+    setActive({ ...snapshot, updatedAt: nowIso() })
+    setSuggestion(null)
+    setDecisions({})
+  }
+
+  const undo = () => {
+    const next = undoStack(editStack)
+    if (!next || !next.present) return
+    setEditStack(next)
+    applySnapshot(next.present.value)
+  }
+
+  const redo = () => {
+    const next = redoStack(editStack)
+    if (!next || !next.present) return
+    setEditStack(next)
+    applySnapshot(next.present.value)
+  }
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      const target = event.target as HTMLElement | null
+      const inDraftField = target === textareaRef.current || target?.getAttribute('aria-label') === 'Draft title'
+      if (!inDraftField || !(event.ctrlKey || event.metaKey)) return
+      const key = event.key.toLowerCase()
+      if (key === 's') { event.preventDefault(); void saveDraft(); return }
+      if (key === 'z' || key === 'y') {
         event.preventDefault()
-        saveDraft()
+        if (key === 'y' || event.shiftKey) redo()
+        else undo()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [editStack, active])
 
   const removeDraft = async (draft: DraftRecord) => {
-    if (!window.confirm(`Delete draft "${draft.title}"? This cannot be undone.`)) return
+    if (!window.confirm(`Delete draft "${draft.title}"? A recoverable snapshot will remain in version history.`)) return
     try {
       await dbDelete('drafts', draft.id)
       const next = drafts.filter((item) => item.id !== draft.id)
       setDrafts(next)
-      if (active?.id === draft.id) { setActive(next[0] || null); setDirty(false) }
+      if (active?.id === draft.id) setActive(next[0] || null)
       bumpRefresh()
-      notify('Draft deleted.', 'info')
+      notify('Draft deleted. The previous version is available in Version history.', 'info')
     } catch (error) {
       notify(error instanceof Error ? error.message : 'The draft could not be deleted.', 'error')
     }
@@ -137,7 +222,7 @@ export default function WritingLab() {
     const start = textarea?.selectionStart ?? active.content.length
     const end = textarea?.selectionEnd ?? start
     const content = `${active.content.slice(0, start)}${insertText}${active.content.slice(end)}`
-    updateActive({ content })
+    applyEdit('content', { content })
     setTimeout(() => {
       if (!textarea) return
       textarea.focus()
@@ -169,28 +254,115 @@ export default function WritingLab() {
     notify(`Bibliography with ${references.length} reference(s) inserted.`, 'success')
   }
 
+  const captureSelection = (): SelectionSpan | null => {
+    const textarea = textareaRef.current
+    const draft = activeRef.current
+    if (!textarea || !draft) return null
+    let start = textarea.selectionStart
+    let end = textarea.selectionEnd
+    if (start === end) {
+      const content = draft.content
+      const previous = content.lastIndexOf('\n\n', Math.max(0, start - 1))
+      const next = content.indexOf('\n\n', end)
+      start = previous === -1 ? 0 : previous + 2
+      end = next === -1 ? content.length : next
+    }
+    if (end <= start) { setSelection(null); return null }
+    const span = { start, end, text: draft.content.slice(start, end) }
+    setSelection(span)
+    return span
+  }
+
+  const generateSuggestion = async () => {
+    const selected = selection && selection.text ? selection : captureSelection()
+    if (!selected || !selected.text.trim()) { notify('Select a sentence or paragraph in the draft first.', 'warning'); return }
+    setRewriteBusy(true)
+    const controller = new AbortController()
+    rewriteTimer.current = setTimeout(() => controller.abort(), rewriteEngine === 'ollama' ? 90000 : 5000)
+    try {
+      let rewritten: string
+      if (rewriteEngine === 'local') {
+        rewritten = rewriteParagraph(selected.text, { preset: rewritePreset })
+      } else {
+        const cleanEndpoint = normalizeEndpoint(endpoint)
+        rewritten = await rewriteWithOllama(selected.text, {
+          endpoint: cleanEndpoint, model, preset: rewritePreset, signal: controller.signal
+        })
+        setEndpoint(cleanEndpoint)
+        await setSetting('ollamaEndpoint', cleanEndpoint).catch(() => {})
+        await setSetting('ollamaModel', model).catch(() => {})
+      }
+      if (rewritten === selected.text) {
+        notify('No changes were suggested for this selection.', 'info')
+        setSuggestion(null)
+        return
+      }
+      setSuggestion({
+        selection: selected,
+        engine: rewriteEngine,
+        preset: rewritePreset,
+        original: selected.text,
+        rewritten,
+        diff: buildRewriteDiff(selected.text, rewritten),
+        createdAt: nowIso()
+      })
+      setDecisions({})
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'The rewrite could not be generated.', 'error')
+    } finally {
+      if (rewriteTimer.current) clearTimeout(rewriteTimer.current)
+      rewriteTimer.current = null
+      setRewriteBusy(false)
+    }
+  }
+
+  const applySuggestion = () => {
+    const draft = activeRef.current
+    if (!draft || !suggestion) return
+    const { start, end, text } = suggestion.selection
+    if (draft.content.slice(start, end) !== text) {
+      notify('The draft changed since this suggestion was made. Generate a new one.', 'warning')
+      return
+    }
+    const acceptedText = applyRewriteDecisions(suggestion.diff, decisions)
+    const content = `${draft.content.slice(0, start)}${acceptedText}${draft.content.slice(end)}`
+    applyEdit('content', { content })
+    setTimeout(() => {
+      textareaRef.current?.focus()
+      textareaRef.current?.setSelectionRange(start, start + acceptedText.length)
+    }, 0)
+    const count = summarizeRewriteDiff(suggestion.diff, decisions)
+    notify(`${count.accepted} of ${count.total} change(s) applied to the draft.`, 'success')
+    setSuggestion(null)
+    setSelection(null)
+    setDecisions({})
+  }
+
   const stats = useMemo(() => analyzeDraft(active?.content || ''), [active?.content])
+  const changeSummary = useMemo(() => suggestion ? summarizeChanges(suggestion.original, suggestion.rewritten) : null, [suggestion])
   const targetNumber = Math.max(1, Number(target) || 1000)
   const longSentenceList = stats.longSentences.slice(0, 4)
 
   if (loading) return <div className="grid min-h-[60vh] place-items-center"><Spinner label="Opening Writing Lab…" /></div>
 
   return <div>
-    <PageHeader eyebrow="WRITING / 01" title="Writing Lab" description="Draft in plain text with local, rule-based checks — no AI service and no detector claims."
+    <PageHeader eyebrow="WRITING / 01" title="Writing Lab" description="Draft in plain text with local, rule-based checks and reviewable inline rewrites — no AI service and no detector claims."
       actions={<>
+        <Button variant="ghost" onClick={undo} disabled={!canUndo(editStack)} icon={<Undo2 size={14} />} title="Undo (Ctrl/Cmd+Z)">Undo</Button>
+        <Button variant="ghost" onClick={redo} disabled={!canRedo(editStack)} icon={<Redo2 size={14} />} title="Redo (Ctrl/Cmd+Shift+Z)">Redo</Button>
         <Button variant="secondary" onClick={() => exportDraft('txt')} disabled={!active} icon={<ArrowDownToLine size={14} />}>Export text</Button>
-        <Button variant="primary" onClick={() => saveDraft()} disabled={!active || !dirty} icon={<Save size={14} />}>{dirty ? 'Save draft' : 'Saved'}</Button>
+        <Button variant="primary" onClick={() => saveDraft()} disabled={!active || !autosavePending} icon={<Save size={14} />}>{autosavePending ? 'Save draft' : 'Saved'}</Button>
       </>}
     />
 
     <div className="grid items-start gap-3 xl:grid-cols-[220px_minmax(0,1fr)_290px]">
       <aside className="space-y-2">
         <Card className="p-2.5">
-          <div className="mb-2 flex items-center justify-between"><h2 className="text-xs font-extrabold text-slate-700 dark:text-slate-200">Drafts</h2><Badge tone="slate">{drafts.length}</Badge></div>
+          <div className="mb-2 flex items-center justify-between"><h2 className="text-xs font-extrabold text-slate-700">Drafts</h2><Badge tone="slate">{drafts.length}</Badge></div>
           <div className="max-h-[430px] space-y-1 overflow-auto">
-            {drafts.map((draft) => <div key={draft.id} className={`group flex items-center gap-1 rounded-md border p-1.5 ${active?.id === draft.id ? 'border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/40' : 'border-slate-100 dark:border-slate-800'}`}>
-              <button type="button" onClick={() => { setActive(draft); setDirty(false) }} className="min-w-0 flex-1 text-left">
-                <span className="block truncate text-[10px] font-bold text-slate-700 dark:text-slate-200">{draft.title || 'Untitled draft'}</span>
+            {drafts.map((draft) => <div key={draft.id} className={`group flex items-center gap-1 rounded-md border p-1.5 ${active?.id === draft.id ? 'border-blue-300 bg-blue-50' : 'border-slate-100'}`}>
+              <button type="button" onClick={() => setActive(draft)} className="min-w-0 flex-1 text-left">
+                <span className="block truncate text-[10px] font-bold text-slate-700">{draft.title || 'Untitled draft'}</span>
                 <span className="mt-0.5 block text-[9px] text-slate-400">{new Date(draft.updatedAt).toLocaleDateString()}</span>
               </button>
               <button type="button" onClick={() => removeDraft(draft)} aria-label={`Delete ${draft.title}`} className="text-slate-300 hover:text-red-500"><Trash2 size={11} /></button>
@@ -201,14 +373,14 @@ export default function WritingLab() {
         </Card>
 
         <Card className="p-3">
-          <h2 className="text-xs font-extrabold text-slate-700 dark:text-slate-200">Word target</h2>
+          <h2 className="text-xs font-extrabold text-slate-700">Word target</h2>
           <div className="mt-2 flex items-center gap-1.5"><Input type="number" min={1} value={target} onChange={(event) => setTarget(event.target.value)} aria-label="Word target" /><span className="text-[10px] text-slate-400">words</span></div>
           <ProgressBar value={Math.min(100, (stats.wordCount / targetNumber) * 100)} />
           <p className="mt-1 text-[9.5px] text-slate-400">{stats.wordCount.toLocaleString()} / {targetNumber.toLocaleString()} words</p>
         </Card>
 
         <Card className="p-3">
-          <h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700 dark:text-slate-200"><BookOpen size={13} className="text-blue-500" />Insert citation</h2>
+          <h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><BookOpen size={13} className="text-blue-500" />Insert citation</h2>
           {references.length ? <>
             <Field label="Saved reference" className="mt-1"><Select value={citationId} onChange={(event) => setCitationId(event.target.value)}>{references.map((reference) => <option key={reference.id} value={reference.id}>{reference.title.slice(0, 70)}</option>)}</Select></Field>
             <Field label="Citation style" className="mt-1.5"><Select value={citationStyle} onChange={(event) => setCitationStyle(event.target.value)}>{CITATION_STYLES.map((item) => <option key={item}>{item}</option>)}</Select></Field>
@@ -221,28 +393,97 @@ export default function WritingLab() {
       </aside>
 
       <Card className="min-w-0 overflow-hidden">
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-2.5 dark:border-slate-800">
-          <Input value={active?.title || ''} onChange={(event) => updateActive({ title: event.target.value })} placeholder="Draft title" aria-label="Draft title" className="!h-8 min-w-[160px] flex-1 !text-xs !font-bold" disabled={!active} />
-          <span className="flex items-center gap-1 text-[9px] text-emerald-600 dark:text-emerald-400"><ShieldCheck size={11} /> local</span>
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-2.5">
+          <Input value={active?.title || ''} onChange={(event) => applyEdit('title', { title: event.target.value })} placeholder="Draft title" aria-label="Draft title" className="!h-8 min-w-[160px] flex-1 !text-xs !font-bold" disabled={!active} />
+          <span className="flex items-center gap-1 text-[9px] text-emerald-600"><ShieldCheck size={11} /> local</span>
+          <Button size="sm" variant="secondary" onClick={captureSelection} disabled={!active} icon={<WandSparkles size={12} />}>Rewrite selection</Button>
           <Button size="sm" variant="ghost" onClick={copyDraft} disabled={!active} icon={<Copy size={12} />}>Copy</Button>
           <Button size="sm" variant="secondary" onClick={() => exportDraft('md')} disabled={!active} icon={<ArrowDownToLine size={12} />}>MD</Button>
         </div>
         {active ? <>
-          <textarea ref={textareaRef} value={active.content} onChange={(event) => updateActive({ content: event.target.value })}
+          <textarea ref={textareaRef} value={active.content}
+            onChange={(event) => applyEdit('content', { content: event.target.value })}
+            onSelect={captureSelection}
+            onKeyUp={captureSelection}
+            onClick={captureSelection}
             placeholder="Write or paste your research draft here. Use Markdown headings if you want a simple structure."
-            spellCheck className="block min-h-[58vh] w-full resize-y border-0 bg-white p-5 font-serif text-[14px] leading-[1.9] text-slate-700 outline-none placeholder:text-slate-300 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-600" aria-label="Draft content" />
-          <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-3 py-2 text-[9.5px] text-slate-400 dark:border-slate-800">
+            spellCheck className="block min-h-[58vh] w-full resize-y border-0 bg-white p-5 font-serif text-[14px] leading-[1.9] text-slate-700 outline-none placeholder:text-slate-300" aria-label="Draft content" />
+          <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-3 py-2 text-[9.5px] text-slate-400">
             <span>{stats.wordCount.toLocaleString()} words</span><span>·</span><span>{stats.sentenceCount.toLocaleString()} sentences</span><span>·</span><span>{stats.paragraphCount} paragraphs</span><span>·</span><span>{stats.readingMinutes < 1 ? '<1' : Math.round(stats.readingMinutes)} min read</span>
-            <span className={`ml-auto ${dirty ? 'text-amber-500' : 'text-emerald-500'}`}>{dirty ? 'Unsaved changes' : 'Saved locally'}</span>
+            <span className={`ml-auto ${autosavePending || saveStatus === 'saving' ? 'text-amber-500' : saveStatus === 'error' ? 'text-red-500' : 'text-emerald-500'}`}>
+              {saveStatus === 'error' ? 'Save failed — retry' : autosavePending || saveStatus === 'saving' ? 'Autosaving…' : 'Saved locally'}
+            </span>
           </div>
         </> : <div className="grid min-h-[58vh] place-items-center p-6 text-center">
-          <div><div className="mx-auto grid h-11 w-11 place-items-center rounded-xl bg-blue-50 text-blue-500 dark:bg-blue-950/40 dark:text-blue-300"><FileText size={20} /></div><h2 className="mt-3 text-sm font-extrabold text-slate-700 dark:text-slate-200">Start a draft</h2><p className="mt-1 max-w-sm text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">Create a new plain-text draft. Everything stays in this browser and autosaves while you write.</p><Button className="mt-3" onClick={createDraft} icon={<Plus size={13} />}>New draft</Button></div>
+          <div><div className="mx-auto grid h-11 w-11 place-items-center rounded-xl bg-blue-50 text-blue-500"><FileText size={20} /></div><h2 className="mt-3 text-sm font-extrabold text-slate-700">Start a draft</h2><p className="mt-1 max-w-sm text-[10px] leading-relaxed text-slate-500">Create a new plain-text draft. Everything stays in this browser and autosaves while you write.</p><Button className="mt-3" onClick={createDraft} icon={<Plus size={13} />}>New draft</Button></div>
         </div>}
       </Card>
 
       <aside className="space-y-3">
         <Card className="p-3.5">
-          <div className="flex items-center justify-between"><h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700 dark:text-slate-200"><Sparkles size={13} className="text-blue-500" />Writing checks</h2><Badge tone="blue">rule-based</Badge></div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><WandSparkles size={13} className="text-violet-500" />Inline rewrite</h2>
+            {selection && <Badge tone="blue">{selection.text.trim() ? `${selection.text.trim().split(/\s+/).length} words selected` : 'No selection'}</Badge>}
+          </div>
+          {!suggestion ? <>
+            <p className="mt-2 text-[10px] leading-relaxed text-slate-500">Select a sentence in the draft (or place the cursor in a paragraph) and generate a reviewable suggestion. Nothing changes until you apply it.</p>
+            <Field label="Style" className="mt-2">
+              <Select value={rewritePreset} onChange={(event) => setRewritePreset(event.target.value)}>
+                {REWRITE_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+              </Select>
+            </Field>
+            <div className="mt-2 flex gap-1">
+              <Button size="sm" variant={rewriteEngine === 'local' ? 'primary' : 'secondary'} className="flex-1" onClick={() => setRewriteEngine('local')}>Local rules</Button>
+              <Button size="sm" variant={rewriteEngine === 'ollama' ? 'primary' : 'secondary'} className="flex-1" onClick={() => setRewriteEngine('ollama')}>Ollama</Button>
+            </div>
+            {rewriteEngine === 'ollama' && <div className="mt-2 space-y-2">
+              <Field label="Endpoint" hint="Browser-local only.">
+                <Input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} spellCheck={false} />
+              </Field>
+              <Field label="Model">
+                <Input value={model} onChange={(event) => setModel(event.target.value)} spellCheck={false} />
+              </Field>
+              <p className="text-[9px] leading-relaxed text-slate-400">The selected text is sent only when you generate. Protected values are verified before a suggestion can be accepted.</p>
+            </div>}
+            <Button size="sm" variant="primary" className="mt-2 w-full" disabled={!active || rewriteBusy} onClick={generateSuggestion} icon={<Sparkles size={12} />}>
+              {rewriteBusy ? 'Rewriting…' : 'Suggest rewrite'}
+            </Button>
+            {selection && <div className="mt-2 max-h-20 overflow-auto rounded-lg bg-slate-50 p-2 text-[9.5px] leading-relaxed text-slate-500">{selection.text.slice(0, 320)}{selection.text.length > 320 ? '…' : ''}</div>}
+          </> : <>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <Badge tone={suggestion.engine === 'local' ? 'green' : 'blue'}>{suggestion.engine === 'local' ? 'Local rules' : 'Ollama'}</Badge>
+              <Badge tone="slate">{REWRITE_PRESETS.find((preset) => preset.id === suggestion.preset)?.label || suggestion.preset}</Badge>
+              {changeSummary && <Badge tone={changeSummary.wordDelta <= 0 ? 'green' : 'slate'}>{changeSummary.wordDelta > 0 ? '+' : ''}{changeSummary.wordDelta} words</Badge>}
+              <button type="button" onClick={() => { setSuggestion(null); setDecisions({}) }} className="ml-auto text-slate-400 hover:text-slate-700" aria-label="Discard suggestion"><X size={13} /></button>
+            </div>
+            <div className="mt-2 max-h-[42vh] space-y-2 overflow-auto pr-1">
+              {suggestion.diff.groups.map((group: { id: string; before: string; after: string }, index: number) => {
+                const accepted = decisions[group.id] !== false
+                return <div key={group.id} className={`rounded-lg border p-2 ${accepted ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-slate-50'}`}>
+                  <div className="mb-1.5 flex items-center gap-1">
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Change {index + 1}</span>
+                    <div className="ml-auto flex gap-1">
+                      <button type="button" onClick={() => setDecisions((current) => ({ ...current, [group.id]: true }))} className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${accepted ? 'bg-emerald-600 text-white' : 'bg-white text-slate-500 hover:text-emerald-600'}`}>Accept</button>
+                      <button type="button" onClick={() => setDecisions((current) => ({ ...current, [group.id]: false }))} className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${!accepted ? 'bg-slate-600 text-white' : 'bg-white text-slate-500 hover:text-slate-700'}`}>Reject</button>
+                    </div>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <div className="rounded bg-rose-50 px-2 py-1 text-[9.5px] leading-relaxed text-rose-700 line-through">{group.before || '(no original text)'}</div>
+                    <div className="rounded bg-emerald-50 px-2 py-1 text-[9.5px] leading-relaxed text-emerald-700">{group.after || '(text removed)'}</div>
+                  </div>
+                </div>
+              })}
+            </div>
+            <div className="mt-2 flex items-center gap-1">
+              <Button size="sm" variant="primary" className="flex-1" onClick={applySuggestion} icon={<Check size={12} />}>Apply accepted</Button>
+              <Button size="sm" variant="ghost" onClick={() => setDecisions(Object.fromEntries(suggestion.diff.groups.map((group: { id: string }) => [group.id, false])))}>Reject all</Button>
+            </div>
+            <p className="mt-1.5 text-[9px] leading-relaxed text-slate-400">Always verify scientific meaning. Local rules and self-hosted models can sound confident while being wrong.</p>
+          </>}
+        </Card>
+
+        <Card className="p-3.5">
+          <div className="flex items-center justify-between"><h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><Sparkles size={13} className="text-blue-500" />Writing checks</h2><Badge tone="blue">rule-based</Badge></div>
           <div className="mt-2 space-y-1.5">
             <CheckRow label="Readability" value={stats.flesch === null ? '—' : `${Math.round(stats.flesch)} · ${readabilityLabel(stats.flesch)}`} good={stats.flesch === null || stats.flesch >= 50} />
             <CheckRow label="Avg. sentence" value={`${stats.averageSentenceLength.toFixed(1)} words`} good={stats.averageSentenceLength > 0 && stats.averageSentenceLength <= 25} />
@@ -257,20 +498,20 @@ export default function WritingLab() {
         </Card>
 
         {longSentenceList.length > 0 && <Card className="p-3.5">
-          <h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700 dark:text-slate-200"><TriangleAlert size={13} className="text-amber-500" />Consider splitting</h2>
+          <h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><TriangleAlert size={13} className="text-amber-500" />Consider splitting</h2>
           <ul className="mt-2 space-y-2">
-            {longSentenceList.map((sentence: { index: number; words: number; text: string }) => <li key={sentence.index} className="rounded-md bg-slate-50 p-2 text-[9.5px] leading-relaxed text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">Sentence {sentence.index} · {sentence.words} words<br /><span className="line-clamp-3">{sentence.text.slice(0, 220)}{sentence.text.length > 220 ? '…' : ''}</span></li>)}
+            {longSentenceList.map((sentence: { index: number; words: number; text: string }) => <li key={sentence.index} className="rounded-md bg-slate-50 p-2 text-[9.5px] leading-relaxed text-slate-500">Sentence {sentence.index} · {sentence.words} words<br /><span className="line-clamp-3">{sentence.text.slice(0, 220)}{sentence.text.length > 220 ? '…' : ''}</span></li>)}
           </ul>
         </Card>}
 
         <Card className="p-3.5">
-          <h2 className="text-xs font-extrabold text-slate-700 dark:text-slate-200">Export & safety</h2>
+          <h2 className="text-xs font-extrabold text-slate-700">Export & safety</h2>
           <div className="mt-2 grid gap-1.5">
             <Button size="sm" variant="secondary" onClick={() => exportDraft('txt')} disabled={!active} icon={<ArrowDownToLine size={12} />}>Plain text (.txt)</Button>
             <Button size="sm" variant="secondary" onClick={() => exportDraft('md')} disabled={!active} icon={<ArrowDownToLine size={12} />}>Markdown (.md)</Button>
             <Button size="sm" variant="ghost" onClick={copyDraft} disabled={!active} icon={<Copy size={12} />}>Copy all text</Button>
           </div>
-          <p className="mt-2 text-[9px] leading-relaxed text-slate-400">Export regularly. Drafts are stored in IndexedDB and can be lost if browser site data is cleared.</p>
+          <p className="mt-2 text-[9px] leading-relaxed text-slate-400">Drafts autosave to IndexedDB and keep bounded version snapshots. Export regularly if browser site data may be cleared.</p>
         </Card>
       </aside>
     </div>
@@ -278,8 +519,8 @@ export default function WritingLab() {
 }
 
 function CheckRow({ label, value, good, neutral = false }: { label: string; value: string; good: boolean; neutral?: boolean }) {
-  return <div className="flex gap-2 border-b border-slate-100 py-1.5 last:border-0 dark:border-slate-800">
+  return <div className="flex gap-2 border-b border-slate-100 py-1.5 last:border-0">
     <span className={`mt-0.5 shrink-0 ${neutral ? 'text-slate-300' : good ? 'text-emerald-500' : 'text-amber-500'}`}>{neutral ? <FileText size={11} /> : good ? <Check size={11} /> : <TriangleAlert size={11} />}</span>
-    <div className="min-w-0"><div className="text-[10px] font-bold text-slate-600 dark:text-slate-300">{label}</div><div className="break-words text-[9px] leading-relaxed text-slate-400">{value}</div></div>
+    <div className="min-w-0"><div className="text-[10px] font-bold text-slate-600">{label}</div><div className="break-words text-[9px] leading-relaxed text-slate-400">{value}</div></div>
   </div>
 }

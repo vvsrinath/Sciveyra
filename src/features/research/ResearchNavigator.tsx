@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ArrowDownToLine, ArrowRight, BookOpen, Check, ExternalLink, Fingerprint,
-  Loader2, Plus, Search, ShieldCheck, SlidersHorizontal, TriangleAlert
+  ArrowDownToLine, ArrowRight, BookOpen, Check, Database, ExternalLink, Fingerprint,
+  Loader2, Plus, RefreshCw, Search, ShieldCheck, SlidersHorizontal, TriangleAlert
 } from 'lucide-react'
 import { Badge, Button, Callout, Card, Field, Input, PageHeader, Select, Spinner, Toggle } from '../../components/ui'
 import { useApp } from '../../app/AppContext'
 import { dbGetAll, dbPut, getSetting, setSetting } from '../../lib/storage.js'
 import { exportBibTeX, findDuplicate, normalizeReference } from '../../lib/references.js'
 import { downloadText } from '../../lib/export.js'
-import { ipPatternLinks, OA_SOURCES, searchOpenAccess } from '../../lib/metadata.js'
-import { nowIso } from '../../lib/util.js'
+import { enrichWithUnpaywall, ipPatternLinks, OA_SOURCES, searchOpenAccess } from '../../lib/metadata.js'
+import {
+  cacheKey, expandSources, isFresh, isStale, readCacheEntry,
+  summarizeSourceHealth, writeCacheEntry
+} from '../../lib/searchCache.js'
+import { formatRelative, nowIso } from '../../lib/util.js'
 import type { Reference } from '../../types'
 
 type Result = {
@@ -34,6 +38,8 @@ type Result = {
 
 type SourceId = 'openalex' | 'crossref' | 'doaj' | 'europepmc' | 'arxiv' | 'peerreviewed'
 type SearchState = { results: Result[]; errors: string[]; sources: string[] }
+type CacheStatus = 'fresh' | 'stale' | 'live'
+type CacheInfo = { key: string; status: CacheStatus; fetchedAt: string; fromCache: boolean }
 
 const SUGGESTIONS = ['XRD analysis nanomaterials', 'plastic pyrolysis oil engine performance', 'machine learning materials discovery', 'peer reviewed review battery recycling']
 const DEFAULT_SOURCES: SourceId[] = ['peerreviewed']
@@ -49,6 +55,8 @@ export default function ResearchNavigator() {
   const [search, setSearch] = useState<SearchState>({ results: [], errors: [], sources: [] })
   const [loading, setLoading] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
+  const [cacheInfo, setCacheInfo] = useState<CacheInfo | null>(null)
+  const [attemptedSources, setAttemptedSources] = useState<string[]>([])
   const [saved, setSaved] = useState<Reference[]>([])
   const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set())
   const [savingKey, setSavingKey] = useState('')
@@ -77,37 +85,122 @@ export default function ResearchNavigator() {
     return true
   }), [search.results, reviewOnly, oaOnly])
 
+  const currentKey = useMemo(() => cacheKey(query, sources, rows), [query, sources, rows])
+  const sourceHealth = useMemo(() => summarizeSourceHealth({
+    attempted: attemptedSources,
+    sources: search.sources,
+    errors: search.errors,
+    results: search.results
+  }), [attemptedSources, search.sources, search.errors, search.results])
+  const activeCache = cacheInfo?.key === currentKey ? cacheInfo : null
+
   const toggleSource = (id: SourceId) => {
     setSources((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   }
 
-  const runSearch = async (searchQuery = query) => {
+  const runSearch = async (searchQuery = query, options: { bypassCache?: boolean } = {}) => {
     const trimmed = searchQuery.trim()
     if (!trimmed) { notify('Enter a topic, author or DOI to search.', 'warning'); return }
     if (!sources.length) { notify('Choose at least one metadata source.', 'warning'); return }
+    const key = cacheKey(trimmed, sources, rows)
+    const attempted = expandSources(sources)
     setLoading(true)
     setHasSearched(true)
     setSearch({ results: [], errors: [], sources: [] })
+    setCacheInfo(null)
+    setAttemptedSources(attempted)
     await setSetting('unpaywallEmail', email.trim()).catch(() => {})
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 45000)
+    let cached: any = null
+
+    // Unpaywall is always applied here, never before caching, so the current
+    // browser-local email can change without invalidating the cache key.
+    const enrich = async (results: Result[]) => {
+      if (!email.trim()) return { results, errors: [] as string[] }
+      try {
+        const payload = await enrichWithUnpaywall(results, email.trim(), { signal: controller.signal })
+        return {
+          results: (Array.isArray(payload?.results) ? payload.results : results) as Result[],
+          errors: (Array.isArray(payload?.errors) ? payload.errors : []) as string[]
+        }
+      } catch {
+        return { results, errors: [] as string[] }
+      }
+    }
+
+    const serveCached = async (status: 'fresh' | 'stale') => {
+      const fetchedAt = String(cached.fetchedAt || cached.updatedAt || cached.createdAt || nowIso())
+      const enriched = await enrich(Array.isArray(cached.results) ? cached.results : [])
+      setSearch({
+        results: enriched.results,
+        sources: Array.isArray(cached.sources) ? cached.sources : [],
+        errors: enriched.errors
+      })
+      setAttemptedSources(Array.isArray(cached.sourceIds) && cached.sourceIds.length ? cached.sourceIds : attempted)
+      setCacheInfo({ key, status, fetchedAt, fromCache: true })
+      notify(
+        status === 'stale'
+          ? `Live sources were unavailable; showing results cached ${formatRelative(fetchedAt).toLowerCase()}. Refresh sources to retry.`
+          : `Loaded ${enriched.results.length} cached record(s) from ${formatRelative(fetchedAt).toLowerCase()}. Refresh sources to check live data.`,
+        status === 'stale' ? 'warning' : 'info'
+      )
+    }
+
+    const fail = (message: string) => {
+      setSearch({ results: [], errors: [message], sources: [] })
+      notify(message, 'error')
+    }
+
     try {
+      cached = await readCacheEntry(key)
+      const canUseFresh = Boolean(cached && isFresh(cached) && !options.bypassCache)
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false
+
+      if (offline) {
+        if (cached) await serveCached(canUseFresh ? 'fresh' : 'stale')
+        else fail('You are offline and no cached results exist for this search. Reconnect and try again.')
+        return
+      }
+      if (canUseFresh) { await serveCached('fresh'); return }
+
       const payload = await searchOpenAccess(trimmed, sources, {
         rows: Math.max(1, Math.min(30, Number(rows) || 10)),
-        email: email.trim(),
-        signal: controller.signal
+        signal: controller.signal,
+        enrichOa: false
+      }) as SearchState
+      const sourcesFailed = payload.errors.length > 0 && payload.results.length === 0
+
+      if (sourcesFailed && cached) { await serveCached('stale'); return }
+      if (sourcesFailed) { fail(payload.errors.join(' · ') || 'The providers could not be reached.'); return }
+
+      const enriched = await enrich(payload.results)
+      setSearch({
+        results: enriched.results,
+        sources: payload.sources || [],
+        errors: [...payload.errors, ...enriched.errors]
       })
-      setSearch(payload)
+      setCacheInfo({ key, status: 'live', fetchedAt: nowIso(), fromCache: false })
+      if (!payload.errors.length) {
+        try {
+          await writeCacheEntry(key, {
+            results: payload.results,
+            sources: payload.sources,
+            errors: [],
+            query: trimmed
+          }, { sourceIds: sources, rows })
+        } catch { /* the cache is best-effort */ }
+      }
       notify(
-        payload.results.length
-          ? `Loaded ${payload.results.length} record(s) from ${payload.sources.length || 'public metadata'} source(s). Verify before citing.`
+        enriched.results.length
+          ? `Loaded ${enriched.results.length} record(s) from ${payload.sources.length || 'public metadata'} source(s). Verify before citing.`
           : 'No matching open-access records were returned. Try broader terms or another source.',
-        payload.results.length ? 'success' : 'info'
+        enriched.results.length ? 'success' : 'info'
       )
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : 'The providers could not be reached.'
-      setSearch({ results: [], errors: [message], sources: [] })
-      notify(message, 'error')
+      if (cached && (isFresh(cached) || isStale(cached))) await serveCached('stale')
+      else fail(message)
     } finally {
       clearTimeout(timer)
       setLoading(false)
@@ -210,6 +303,24 @@ export default function ResearchNavigator() {
       </form>
 
       {search.errors.length > 0 && <div className="mt-3 space-y-1.5">{search.errors.map((error, index) => <Callout key={`${error}-${index}`} tone="warning">{error}</Callout>)}</div>}
+
+      {activeCache && <div className="mt-3 rounded-xl border border-slate-200/70 bg-slate-50/60 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-[10.5px] font-extrabold uppercase tracking-[0.12em] text-slate-500"><Database size={13} /> Search cache</span>
+          {activeCache.status === 'live' ? <Badge tone="blue">Live</Badge> : activeCache.status === 'fresh' ? <Badge tone="green">Fresh</Badge> : <Badge tone="amber">Stale</Badge>}
+          {activeCache.fromCache && <Badge tone="slate">cached results</Badge>}
+          <span className="text-[10px] text-slate-500">{formatRelative(activeCache.fetchedAt)}</span>
+          <Button size="sm" variant="ghost" className="ml-auto" disabled={loading} icon={<RefreshCw size={12} />} onClick={() => runSearch(query, { bypassCache: true })}>Refresh sources</Button>
+        </div>
+        {sourceHealth.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">
+          {sourceHealth.map((item) => <span key={item.id || `general-${item.message}`} title={item.message || undefined}
+            className={`max-w-[240px] truncate rounded-md border px-2 py-1 text-[9.5px] font-semibold ${item.status === 'error' ? 'border-red-200 bg-red-50 text-red-700' : item.status === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-500'}`}>
+            {item.label}{item.status === 'ok' ? ` · ${item.count} result${item.count === 1 ? '' : 's'}` : item.status === 'error' ? ` · error: ${item.message || 'failed'}` : ' · no results'}
+          </span>)}
+        </div>}
+      </div>}
+
+      {activeCache?.status === 'stale' && <div className="mt-3"><Callout tone="warning">Live providers could not be reached. These results come from the local cache and may be out of date. Use “Refresh sources” to retry.</Callout></div>}
     </Card>
 
     <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_280px]">
@@ -219,6 +330,7 @@ export default function ResearchNavigator() {
             <h2 className="text-sm font-extrabold text-slate-800">Search results</h2>
             <p className="mt-0.5 text-[10px] text-slate-500">{hasSearched ? `${visibleResults.length} shown · ${search.results.length} returned` : 'Choose sources and search to begin'} · verify every record before citing</p>
           </div>
+          {activeCache?.fromCache && <Badge tone="amber">cached</Badge>}
           {search.sources.length > 0 && <Badge tone="blue">{search.sources.join(' + ')}</Badge>}
         </div>
 
@@ -281,7 +393,7 @@ export default function ResearchNavigator() {
           <ul className="mt-2 space-y-2 text-[10px] leading-relaxed text-slate-500">
             <li className="flex gap-2"><TriangleAlert size={12} className="mt-0.5 shrink-0 text-amber-500" />Review/OA flags come from provider metadata and can be wrong or missing.</li>
             <li className="flex gap-2"><Check size={12} className="mt-0.5 shrink-0 text-emerald-500" />Saved records live in your local IndexedDB library.</li>
-            <li className="flex gap-2"><ShieldCheck size={12} className="mt-0.5 shrink-0 text-blue-500" />Providers are contacted only when you search. Unpaywall is called only with your email.</li>
+            <li className="flex gap-2"><ShieldCheck size={12} className="mt-0.5 shrink-0 text-blue-500" />A recent local cache may be shown instead of contacting providers. Unpaywall is called only with your own email, and its links are never cached.</li>
           </ul>
           <Link to="/references" className="mt-3 inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:underline">Manage saved references <ArrowRight size={11} /></Link>
         </Card>
