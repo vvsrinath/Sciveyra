@@ -14,7 +14,7 @@ Everything runs in the browser. No account, backend, paid API or AI API is requi
 - **Diagram Studio** — build flowcharts and schematics with draggable nodes and labelled connections, then export PNG/SVG/PDF.
 - **Reference Finder** — search free scholarly metadata from OpenAlex, DOAJ, Europe PMC / PubMed Central, Crossref and arXiv; resolve OA links with your own Unpaywall email; review and save records. A peer-reviewed bundle queries OpenAlex + DOAJ + Europe PMC + Crossref. Cached results are labelled fresh/stale with per-source health; refresh bypasses the local cache. Patent/IP and pattern rows link out to external search engines rather than inventing results.
 - **Reference Manager** — add, edit, filter and sort references; import/export BibTeX and RIS; deduplicate; copy formatted citations and in-text citations; resolve a DOI or title to metadata; add a reference from a PDF DOI.
-- **Writing Lab** — Markdown draft editor with outline templates and section guidance, a claim–evidence map linked to saved references, debounced autosave, undo/redo, word targets, citation-style-aware insertion, rule-based writing checks, selection-scoped inline rewrites with per-change accept/reject, and TXT/MD/evidence-map export.
+- **Writing Lab** — Paper-drafting workspace with Markdown/Word-style formatting, a read-only preview, `.docx`/`.md`/`.txt` import and export, Word/Google Docs clipboard paste, image/link/file insertion, direct reuse of Graph Studio/Vector Studio/Image Studio/Figure Composer assets, outline templates and section guidance, a claim–evidence map linked to saved references, debounced autosave, undo/redo, word targets, citation-style-aware insertion, rule-based writing checks, selection-scoped inline rewrites with per-change accept/reject, and evidence-map export.
 - **Paragraph Rewriter** — local deterministic humanising/rewriting with protected numbers, units, DOIs, URLs and citations. Optionally use a self-hosted Ollama endpoint/model you supply; no paid AI API or key is required.
 - **Research Toolkit** — an honest map of every major research tool category. Native cards open working SciVeyra features; external cards link to the real provider with **Open source / Free tier / Institutional / Proprietary** labels. Includes a local qualitative coder with literal code counts, context snippets and CSV export.
 - **Contact** — developer profile with portrait, exact LinkedIn/GitHub/email links and the project copyright notice.
@@ -111,7 +111,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/GRAPHING.md`](docs/GR
 
 ## Testing
 
-The suite covers parsing, statistics, curve fitting, references, multi-source discovery adapters, drafting templates, claim/evidence helpers, rewriting, the built-in test runner, storage, sample data, graph validation, figure building, tool-directory honesty, qualitative coding helpers and the exact public identity/links. Graph tests exercise every 2D type (`line`, `scatter`, `bar`, `area`, `histogram`, `box`, `errorbar`, `heatmap`, `contour`, `spectrum`) and every 3D type (`surface`, `mesh3d`, `scatter3d`), including error-bar alignment, fit labels, publication defaults and 3D contour/lighting/opacity controls.
+The suite covers parsing, statistics, curve fitting, references, multi-source discovery adapters, drafting templates, document import/export (including a real `.docx` round trip), claim/evidence helpers, rewriting, the built-in test runner, storage, sample data, graph validation, figure building, tool-directory honesty, qualitative coding helpers and the exact public identity/links. Graph tests exercise every 2D type (`line`, `scatter`, `bar`, `area`, `histogram`, `box`, `errorbar`, `heatmap`, `contour`, `spectrum`) and every 3D type (`surface`, `mesh3d`, `scatter3d`), including error-bar alignment, fit labels, publication defaults and 3D contour/lighting/opacity controls.
 
 ```bash
 npm test
@@ -134,6 +134,7 @@ The app is a static single-page application. A ready-to-use Netlify configuratio
 
 - Sample datasets are explicitly labelled **synthetic** and must not be treated as experimental measurements.
 - Writing checks are simple heuristics. They are not a grammar checker and cannot reliably detect AI-generated text.
+- Word and Google Docs support is file- and clipboard-based: SciVeyra has no Google Drive sign-in, live co-editing or Word-compatible layout engine. Headings, lists, tables, links, images, bold/italic/underline and code survive the supported subset; track changes, footnotes, endnotes, columns, text boxes, equations and complex styles may be flattened. Imported assets are embedded up to 8 MB each, and exports warn when an asset is too large.
 - Claim status uses exact text matching and saved-reference IDs; it cannot judge whether a source actually supports a claim. Review every evidence link yourself.
 - Chart PDF export embeds a high-resolution raster image; it is not a native vector PDF. Use SVG for vector workflows.
 - Raster-to-vector tracing suits line art, logos and simple diagrams, not photographs or continuous-tone microscopy.
@@ -152,4 +153,4 @@ The app is a static single-page application. A ready-to-use Netlify configuratio
 
 Copyright © 2026 Srinath Vatchavari Venkateshan. All rights reserved. The developer profile and public links are available at `/contact`.
 
-Check each dependency's licence and browser compatibility before public or commercial distribution.
+Document conversion uses Mammoth (BSD-2-Clause) for `.docx` import and `docx` (MIT) for `.docx` export. Both are open source, loaded only when needed and bundled locally; no conversion data is sent to a service. Check each dependency's licence and browser compatibility before public or commercial distribution.

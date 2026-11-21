@@ -1,15 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ClipboardEvent as ReactClipboardEvent } from 'react'
 import {
-  ArrowDownToLine, BookOpen, Check, Copy, FileText, Link2, List, Map, Plus, Redo2,
-  Save, ShieldCheck, Sparkles, Trash2, TriangleAlert, Undo2, WandSparkles, X
+  ArrowDownToLine, BookOpen, Bold, Check, ClipboardPaste, Code2, Copy, Eye, FileDown,
+  FileText, FileUp, Heading2, Image as ImageIcon, ImagePlus, Italic, Link2, List,
+  ListOrdered, Map, Paperclip, Plus, Quote, Redo2, Save, ShieldCheck, Sparkles, Trash2,
+  TriangleAlert, Underline, Undo2, Upload, WandSparkles, X
 } from 'lucide-react'
-import { Badge, Button, Callout, Card, Field, Input, PageHeader, ProgressBar, Select, Spinner } from '../../components/ui'
+import { Badge, Button, Callout, Card, Field, Input, Modal, PageHeader, ProgressBar, Select, Spinner } from '../../components/ui'
 import { useApp } from '../../app/AppContext'
 import { useAutosave } from '../../app/useAutosave'
 import { dbDelete, dbGetAll, dbPut, getSetting, setSetting } from '../../lib/storage.js'
 import { analyzeDraft, readabilityLabel } from '../../lib/writing.js'
 import { inlineCitation, formatCitation, CITATION_STYLES } from '../../lib/references.js'
-import { copyText, downloadText } from '../../lib/export.js'
+import { copyText, downloadBlob, downloadText, readFileAsDataURL, readFileAsText } from '../../lib/export.js'
+import {
+  htmlToMarkdown, markdownToHtml, plainTextToMarkdown, sanitizeUrl, titleFromMarkdown
+} from '../../lib/documentMarkdown.js'
+import {
+  DOCX_MIME, MAX_DOCUMENT_BYTES, MAX_EMBED_BYTES, buildDocxBlob, documentKind, importDocx,
+  markdownExport, readArrayBuffer, textExport
+} from '../../lib/documentFormats.js'
 import { nowIso, uid } from '../../lib/util.js'
 import { canRedo, canUndo, emptyEditStack, initialEditStack, pushEdit, redoStack, undoStack } from '../../lib/history.js'
 import {
@@ -21,7 +31,7 @@ import {
   analyzeParagraph, DEFAULT_OLLAMA_ENDPOINT, DEFAULT_OLLAMA_MODEL, normalizeEndpoint,
   REWRITE_PRESETS, rewriteParagraph, rewriteWithOllama, summarizeChanges
 } from '../../lib/rewriter.js'
-import type { ClaimRecord, DraftRecord, Reference } from '../../types'
+import type { Asset, ClaimRecord, DraftRecord, Reference } from '../../types'
 
 type RewriteEngine = 'local' | 'ollama'
 type SelectionSpan = { start: number; end: number; text: string }
@@ -45,7 +55,18 @@ export default function WritingLab() {
   const [drafts, setDrafts] = useState<DraftRecord[]>([])
   const [active, setActive] = useState<DraftRecord | null>(null)
   const [references, setReferences] = useState<Reference[]>([])
+  const [assets, setAssets] = useState<Asset[]>([])
   const [loading, setLoading] = useState(true)
+  const [importBusy, setImportBusy] = useState(false)
+  const [exportBusy, setExportBusy] = useState(false)
+  const [preview, setPreview] = useState(false)
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [pasteMarkdown, setPasteMarkdown] = useState('')
+  const [pasteHint, setPasteHint] = useState('')
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkUrl, setLinkUrl] = useState('')
+  const [linkLabel, setLinkLabel] = useState('')
+  const [assetOpen, setAssetOpen] = useState(false)
   const [editStack, setEditStack] = useState<EditStack>(emptyEditStack())
   const [target, setTarget] = useState('1000')
   const [templateId, setTemplateId] = useState(DRAFT_TEMPLATES[0].id)
@@ -61,12 +82,19 @@ export default function WritingLab() {
   const [claimChoice, setClaimChoice] = useState<Record<string, string>>({})
   const [rewriteBusy, setRewriteBusy] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const documentInputRef = useRef<HTMLInputElement>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const activeRef = useRef<DraftRecord | null>(null)
   const rewriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   activeRef.current = active
 
   const claims = useMemo<ClaimRecord[]>(() => active?.claims || [], [active?.claims])
   const sections = useMemo(() => parseSections(active?.content || ''), [active?.content])
+  const visualAssets = useMemo(() => assets.filter((asset) => asset.kind === 'image' || asset.kind === 'svg'), [assets])
+  const previewHtml = useMemo(() => markdownToHtml(active?.content || '', {
+    resolveSource: (id: string) => assets.find((asset) => asset.id === id)?.data || ''
+  }), [active?.content, assets])
   const claimSummary = useMemo(
     () => summarizeClaims(claims, active?.content || '', references),
     [claims, active?.content, references]
@@ -76,9 +104,10 @@ export default function WritingLab() {
     let cancelled = false
     ;(async () => {
       try {
-        const [draftList, referenceList, storedEndpoint, storedModel] = await Promise.all([
+        const [draftList, referenceList, assetList, storedEndpoint, storedModel] = await Promise.all([
           dbGetAll('drafts') as Promise<DraftRecord[]>,
           dbGetAll('references') as Promise<Reference[]>,
+          dbGetAll('assets') as Promise<Asset[]>,
           getSetting('ollamaEndpoint', DEFAULT_OLLAMA_ENDPOINT) as Promise<string>,
           getSetting('ollamaModel', DEFAULT_OLLAMA_MODEL) as Promise<string>
         ])
@@ -86,6 +115,7 @@ export default function WritingLab() {
         const sorted = draftList.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
         setDrafts(sorted)
         setReferences(referenceList)
+        setAssets(assetList.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')))
         setActive(sorted[0] || null)
         if (referenceList[0]) setCitationId(referenceList[0].id)
         if (storedEndpoint) setEndpoint(storedEndpoint)
@@ -127,17 +157,27 @@ export default function WritingLab() {
     }
   })
 
-  const createDraft = async () => {
+  const createDraft = async (options: { silentRefresh?: boolean } = {}) => {
     try {
       const draft = newDraft()
       await dbPut('drafts', draft)
       setDrafts((current) => [draft, ...current])
       setActive(draft)
-      bumpRefresh()
+      activeRef.current = draft
+      if (!options.silentRefresh) bumpRefresh()
       setTimeout(() => textareaRef.current?.focus(), 50)
+      return draft
     } catch (error) {
       notify(error instanceof Error ? error.message : 'A new draft could not be created.', 'error')
+      return null
     }
+  }
+
+  const ensureDraft = async () => activeRef.current || createDraft({ silentRefresh: true })
+
+  const reportWarnings = (warnings: string[]) => {
+    if (!warnings.length) return
+    notify(`${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ''}`, 'warning')
   }
 
   const updateActive = (patch: Partial<DraftRecord>) => {
@@ -221,11 +261,75 @@ export default function WritingLab() {
     }
   }
 
-  const exportDraft = (format: 'txt' | 'md') => {
-    if (!active) return
-    const base = (active.title || 'draft').replace(/[^a-z0-9]+/gi, '-').toLowerCase()
-    downloadText(active.content, `${base}.${format}`, `text/${format === 'md' ? 'markdown' : 'plain'};charset=utf-8`)
-    notify(`Draft exported as ${format.toUpperCase()}.`, 'success')
+  const draftFilename = (draft: DraftRecord) => (draft.title || 'draft').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-|-$/g, '') || 'draft'
+
+  const exportDraft = async (format: 'txt' | 'md' | 'docx') => {
+    const draft = activeRef.current
+    if (!draft || exportBusy) return
+    setExportBusy(true)
+    try {
+      const base = draftFilename(draft)
+      if (format === 'docx') {
+        const result = await buildDocxBlob(draft.content, { title: draft.title, assets })
+        downloadBlob(result.blob, `${base}.docx`)
+        reportWarnings(result.warnings)
+        notify('Draft exported as Word .docx with headings, formatting, links and images.', 'success')
+      } else if (format === 'md') {
+        const result = markdownExport(draft.content, assets)
+        downloadText(result.text, `${base}.md`, 'text/markdown;charset=utf-8')
+        reportWarnings(result.warnings)
+        notify('Draft exported as Markdown with saved assets embedded.', 'success')
+      } else {
+        const result = textExport(draft.content, assets)
+        downloadText(result.text, `${base}.txt`, 'text/plain;charset=utf-8')
+        reportWarnings(result.warnings)
+        notify('Draft exported as plain text.', 'success')
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : `The ${format.toUpperCase()} export failed.`, 'error')
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
+  const importDocument = async (file?: File) => {
+    if (!file) return
+    const kind = documentKind(file)
+    if (!kind) { notify('Choose a .docx, .md, .txt or .html file.', 'warning'); return }
+    if (file.size > MAX_DOCUMENT_BYTES) { notify('That document is larger than 25 MB. Split it before importing.', 'warning'); return }
+    setImportBusy(true)
+    try {
+      let content = ''
+      let warnings: string[] = []
+      if (kind === 'docx') {
+        const result = await importDocx(await readArrayBuffer(file))
+        content = result.markdown
+        warnings = result.warnings
+      } else {
+        const raw = await readFileAsText(file)
+        content = kind === 'html' ? htmlToMarkdown(raw) : plainTextToMarkdown(raw)
+      }
+      if (!content.trim()) throw new Error('The file contained no readable text.')
+      const draft = await ensureDraft()
+      if (!draft) throw new Error('A draft could not be created for the import.')
+      if (draft.content.trim() && !window.confirm('Replace the current draft content with the imported document? The previous state stays in Version history.')) return
+      applyEdit('import', {
+        content,
+        title: titleFromMarkdown(content, file.name),
+        template: draft.template,
+        claims: []
+      })
+      setPreview(false)
+      setSelection(null)
+      setSuggestion(null)
+      reportWarnings(warnings)
+      notify(`${file.name} imported. Review formatting and claim links before editing.`, 'success')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'The document could not be imported.', 'error')
+    } finally {
+      setImportBusy(false)
+      if (documentInputRef.current) documentInputRef.current.value = ''
+    }
   }
 
   const copyDraft = async () => {
@@ -245,6 +349,149 @@ export default function WritingLab() {
       textarea.focus()
       textarea.setSelectionRange(start + insertText.length, start + insertText.length)
     }, 0)
+  }
+
+  const wrapSelection = (before: string, after: string, placeholder: string) => {
+    const draft = activeRef.current
+    if (!draft) return
+    const textarea = textareaRef.current
+    const start = textarea?.selectionStart ?? draft.content.length
+    const end = textarea?.selectionEnd ?? start
+    const selected = draft.content.slice(start, end) || placeholder
+    const insert = `${before}${selected}${after}`
+    applyEdit('format', { content: `${draft.content.slice(0, start)}${insert}${draft.content.slice(end)}` })
+    setTimeout(() => {
+      if (!textarea) return
+      textarea.focus()
+      const cursor = start + before.length + selected.length
+      textarea.setSelectionRange(cursor, cursor)
+    }, 0)
+  }
+
+  const prefixLines = (prefix: string) => {
+    const draft = activeRef.current
+    if (!draft) return
+    const textarea = textareaRef.current
+    const start = textarea?.selectionStart ?? draft.content.length
+    const end = textarea?.selectionEnd ?? start
+    const lineStart = draft.content.lastIndexOf('\n', Math.max(0, start - 1)) + 1
+    const newline = draft.content.indexOf('\n', end)
+    const lineEnd = newline === -1 ? draft.content.length : newline
+    const block = draft.content.slice(lineStart, lineEnd) || 'text'
+    const changed = block.split('\n').map((line) => line.trimStart().startsWith(prefix.trim()) ? line : `${prefix}${line}`).join('\n')
+    applyEdit('format', { content: `${draft.content.slice(0, lineStart)}${changed}${draft.content.slice(lineEnd)}` })
+    setTimeout(() => {
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(lineStart + changed.length, lineStart + changed.length)
+    }, 0)
+  }
+
+  const openLinkDialog = () => {
+    const draft = activeRef.current
+    const textarea = textareaRef.current
+    const selected = draft && textarea ? draft.content.slice(textarea.selectionStart, textarea.selectionEnd).trim() : ''
+    setLinkLabel(selected)
+    setLinkUrl('')
+    setLinkOpen(true)
+  }
+
+  const insertLink = () => {
+    const href = sanitizeUrl(linkUrl)
+    if (!href) { notify('Enter a safe http(s), mailto, relative or saved-asset link.', 'warning'); return }
+    const label = linkLabel.trim() || href
+    insertAtCursor(`[${label.replace(/[[\]]/g, '')}](${href})`)
+    setLinkOpen(false)
+    setLinkLabel('')
+    setLinkUrl('')
+    notify('Link inserted. It is preserved in Word, Markdown and preview exports.', 'success')
+  }
+
+  const saveLocalAsset = async (file: File, kind: 'image' | 'svg' | 'file') => {
+    if (file.size > MAX_EMBED_BYTES) throw new Error('Files over 8 MB are not inserted automatically. Add a link instead.')
+    const data = await readFileAsDataURL(file)
+    const asset: Asset = {
+      id: uid('asset'),
+      name: file.name || 'Untitled asset',
+      kind,
+      data,
+      mime: file.type || (kind === 'svg' ? 'image/svg+xml' : 'application/octet-stream'),
+      size: file.size,
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    }
+    await dbPut('assets', asset)
+    setAssets((current) => [asset, ...current])
+    return asset
+  }
+
+  const insertImageFile = async (file?: File) => {
+    if (!file) return
+    try {
+      const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name)
+      if (!/^image\//.test(file.type) && !isSvg) { notify('Choose a PNG, JPEG, GIF, WebP or SVG image.', 'warning'); return }
+      const asset = await saveLocalAsset(file, isSvg ? 'svg' : 'image')
+      insertAtCursor(`![${asset.name.replace(/[[\]]/g, '')}](asset://${asset.id})`)
+      notify('Image saved to SciVeyra assets and inserted. It will be embedded in exported files.', 'success')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'The image could not be inserted.', 'error')
+    } finally {
+      if (imageInputRef.current) imageInputRef.current.value = ''
+    }
+  }
+
+  const insertLocalFile = async (file?: File) => {
+    if (!file) return
+    try {
+      const asset = await saveLocalAsset(file, 'file')
+      insertAtCursor(`[${asset.name.replace(/[[\]]/g, '')}](asset://${asset.id})`)
+      notify('File saved to SciVeyra assets and inserted as a link.', 'success')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'The file could not be inserted.', 'error')
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const insertSavedAsset = (asset: Asset) => {
+    const label = asset.name.replace(/[[\]]/g, '')
+    const isVisual = asset.kind === 'image' || asset.kind === 'svg'
+    insertAtCursor(isVisual ? `![${label}](asset://${asset.id})` : `[${label}](asset://${asset.id})`)
+    setAssetOpen(false)
+    notify(isVisual
+      ? 'Saved visual asset inserted. Export embeds the current stored image.'
+      : 'Saved file inserted as a link.', 'success')
+  }
+
+  const pasteHtml = (event: ReactClipboardEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const html = event.clipboardData.getData('text/html')
+    const plain = event.clipboardData.getData('text/plain')
+    if (html && htmlToMarkdown(html)) {
+      setPasteMarkdown(htmlToMarkdown(html))
+      setPasteHint('Formatted text, headings, lists, tables and links were converted to Markdown. Review it before inserting.')
+    } else {
+      setPasteMarkdown(plainTextToMarkdown(plain))
+      setPasteHint('Plain text pasted. Add Markdown headings or use the formatting toolbar if needed.')
+    }
+  }
+
+  const insertPasted = (mode: 'insert' | 'replace') => {
+    const pasted = pasteMarkdown.trim()
+    const draft = activeRef.current
+    if (!draft || !pasted) { notify('Paste or type content in the box first.', 'warning'); return }
+    if (mode === 'replace') {
+      if (draft.content.trim() && !window.confirm('Replace the current draft with the pasted content? The previous state stays in Version history.')) return
+      applyEdit('paste', { content: pasted, claims: [] })
+      setSelection(null)
+      setSuggestion(null)
+    } else {
+      insertAtCursor(`\n\n${pasted}\n\n`)
+    }
+    setPasteOpen(false)
+    setPasteMarkdown('')
+    setPasteHint('')
+    notify(mode === 'replace' ? 'Draft replaced with pasted content.' : 'Pasted content inserted at the cursor.', 'success')
   }
 
   const insertCitation = () => {
@@ -452,14 +699,19 @@ export default function WritingLab() {
   if (loading) return <div className="grid min-h-[60vh] place-items-center"><Spinner label="Opening Writing Lab…" /></div>
 
   return <div>
-    <PageHeader eyebrow="WRITING / 01" title="Writing Lab" description="Draft with outline templates, section guidance and a claim–evidence map linked to saved references — plus local checks and reviewable inline rewrites."
+    <PageHeader eyebrow="WRITING / 01" title="Writing Lab" description="Draft a complete paper with outlines, Word/Google Docs import and export, links, images, saved visual assets, citation tools, a claim–evidence map and reviewable local rewrites."
       actions={<>
         <Button variant="ghost" onClick={undo} disabled={!canUndo(editStack)} icon={<Undo2 size={14} />} title="Undo (Ctrl/Cmd+Z)">Undo</Button>
         <Button variant="ghost" onClick={redo} disabled={!canRedo(editStack)} icon={<Redo2 size={14} />} title="Redo (Ctrl/Cmd+Shift+Z)">Redo</Button>
-        <Button variant="secondary" onClick={() => exportDraft('txt')} disabled={!active} icon={<ArrowDownToLine size={14} />}>Export text</Button>
+        <Button variant="secondary" onClick={() => documentInputRef.current?.click()} disabled={importBusy} icon={<Upload size={14} />}>{importBusy ? 'Importing…' : 'Import'}</Button>
+        <Button variant="secondary" onClick={() => void exportDraft('docx')} disabled={!active || exportBusy} icon={<FileDown size={14} />}>{exportBusy ? 'Exporting…' : 'Word (.docx)'}</Button>
         <Button variant="primary" onClick={() => saveDraft()} disabled={!active || !autosavePending} icon={<Save size={14} />}>{autosavePending ? 'Save draft' : 'Saved'}</Button>
       </>}
     />
+
+    <input ref={documentInputRef} type="file" accept=".md,.markdown,.txt,.docx,.html,.htm,text/markdown,text/plain,text/html" className="hidden" onChange={(event) => void importDocument(event.target.files?.[0])} aria-label="Import document" />
+    <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" className="hidden" onChange={(event) => void insertImageFile(event.target.files?.[0])} aria-label="Insert image file" />
+    <input ref={fileInputRef} type="file" className="hidden" onChange={(event) => void insertLocalFile(event.target.files?.[0])} aria-label="Insert local file" />
 
     <div className="grid items-start gap-3 xl:grid-cols-[220px_minmax(0,1fr)_290px]">
       <aside className="space-y-2">
@@ -475,7 +727,8 @@ export default function WritingLab() {
             </div>)}
             {!drafts.length && <p className="px-1 py-2 text-[10px] text-slate-400">No drafts yet.</p>}
           </div>
-          <Button size="sm" className="mt-2 w-full" onClick={createDraft} icon={<Plus size={12} />}>New draft</Button>
+          <Button size="sm" className="mt-2 w-full" onClick={() => void createDraft()} icon={<Plus size={12} />}>New draft</Button>
+          <Button size="sm" variant="secondary" className="mt-1.5 w-full" onClick={() => documentInputRef.current?.click()} disabled={importBusy} icon={<FileUp size={12} />}>{importBusy ? 'Importing…' : 'Import document'}</Button>
         </Card>
 
         <Card className="p-3">
@@ -525,20 +778,49 @@ export default function WritingLab() {
 
       <Card className="min-w-0 overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-2.5">
-          <Input value={active?.title || ''} onChange={(event) => applyEdit('title', { title: event.target.value })} placeholder="Draft title" aria-label="Draft title" className="!h-8 min-w-[160px] flex-1 !text-xs !font-bold" disabled={!active} />
+          <Input value={active?.title || ''} onChange={(event) => applyEdit('title', { title: event.target.value })} placeholder="Draft title" aria-label="Draft title" className="!h-8 min-w-[150px] flex-1 !text-xs !font-bold" disabled={!active} />
           <span className="flex items-center gap-1 text-[9px] text-emerald-600"><ShieldCheck size={11} /> local</span>
-          <Button size="sm" variant="secondary" onClick={captureSelection} disabled={!active} icon={<WandSparkles size={12} />}>Rewrite selection</Button>
-          <Button size="sm" variant="ghost" onClick={copyDraft} disabled={!active} icon={<Copy size={12} />}>Copy</Button>
-          <Button size="sm" variant="secondary" onClick={() => exportDraft('md')} disabled={!active} icon={<ArrowDownToLine size={12} />}>MD</Button>
+          <Button size="sm" variant={preview ? 'primary' : 'secondary'} onClick={() => setPreview((value) => !value)} disabled={!active} icon={<Eye size={12} />}>{preview ? 'Write' : 'Preview'}</Button>
         </div>
+
+        <div className="flex flex-wrap items-center gap-1 border-b border-slate-100 bg-slate-50/50 px-2.5 py-1.5">
+          <Button size="sm" variant="ghost" className="!h-7 !px-2" onClick={() => prefixLines('## ')} disabled={!active || preview} title="Heading"><Heading2 size={13} /></Button>
+          <Button size="sm" variant="ghost" className="!h-7 !px-2" onClick={() => wrapSelection('**', '**', 'bold text')} disabled={!active || preview} title="Bold"><Bold size={13} /></Button>
+          <Button size="sm" variant="ghost" className="!h-7 !px-2" onClick={() => wrapSelection('*', '*', 'italic text')} disabled={!active || preview} title="Italic"><Italic size={13} /></Button>
+          <Button size="sm" variant="ghost" className="!h-7 !px-2" onClick={() => wrapSelection('<u>', '</u>', 'underlined text')} disabled={!active || preview} title="Underline"><Underline size={13} /></Button>
+          <span className="mx-1 h-4 w-px bg-slate-200" />
+          <Button size="sm" variant="ghost" className="!h-7 !px-2" onClick={() => prefixLines('- ')} disabled={!active || preview} title="Bullet list"><List size={13} /></Button>
+          <Button size="sm" variant="ghost" className="!h-7 !px-2" onClick={() => prefixLines('1. ')} disabled={!active || preview} title="Numbered list"><ListOrdered size={13} /></Button>
+          <Button size="sm" variant="ghost" className="!h-7 !px-2" onClick={() => prefixLines('> ')} disabled={!active || preview} title="Quote"><Quote size={13} /></Button>
+          <Button size="sm" variant="ghost" className="!h-7 !px-2" onClick={() => wrapSelection('```\n', '\n```', 'code')} disabled={!active || preview} title="Code block"><Code2 size={13} /></Button>
+          <span className="mx-1 h-4 w-px bg-slate-200" />
+          <Button size="sm" variant="ghost" className="!h-7 !px-2" onClick={openLinkDialog} disabled={!active || preview} title="Insert link"><Link2 size={13} /></Button>
+          <Button size="sm" variant="ghost" className="!h-7 !px-2" onClick={() => imageInputRef.current?.click()} disabled={!active || preview} title="Insert image"><ImagePlus size={13} /></Button>
+          <Button size="sm" variant="ghost" className="!h-7 !px-2" onClick={() => fileInputRef.current?.click()} disabled={!active || preview} title="Attach file"><Paperclip size={13} /></Button>
+          <Button size="sm" variant="ghost" className="!h-7 !px-2" onClick={() => setAssetOpen(true)} disabled={!active || preview} title="Insert saved SciVeyra asset"><ImageIcon size={13} /></Button>
+          <Button size="sm" variant="ghost" className="!h-7 !px-2" onClick={() => setPasteOpen(true)} disabled={!active || preview} title="Paste from Word or Google Docs"><ClipboardPaste size={13} /></Button>
+          <span className="ml-auto text-[9px] text-slate-400">{assets.length} saved asset{assets.length === 1 ? '' : 's'}</span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 px-2.5 py-1.5">
+          <Button size="sm" variant="secondary" onClick={captureSelection} disabled={!active || preview} icon={<WandSparkles size={12} />}>Rewrite selection</Button>
+          <Button size="sm" variant="ghost" onClick={copyDraft} disabled={!active} icon={<Copy size={12} />}>Copy</Button>
+          <Button size="sm" variant="secondary" onClick={() => void exportDraft('md')} disabled={!active || exportBusy} icon={<ArrowDownToLine size={12} />}>MD</Button>
+          <Button size="sm" variant="secondary" onClick={() => void exportDraft('txt')} disabled={!active || exportBusy} icon={<ArrowDownToLine size={12} />}>TXT</Button>
+          <Button size="sm" variant="secondary" onClick={() => void exportDraft('docx')} disabled={!active || exportBusy} icon={<FileDown size={12} />}>DOCX</Button>
+        </div>
+
         {active ? <>
-          <textarea ref={textareaRef} value={active.content}
+          {preview ? <div
+            className="markdown-preview min-h-[58vh] bg-white p-5 font-serif text-[14px] leading-[1.9] text-slate-700"
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
+          /> : <textarea ref={textareaRef} value={active.content}
             onChange={(event) => applyEdit('content', { content: event.target.value })}
             onSelect={captureSelection}
             onKeyUp={captureSelection}
             onClick={captureSelection}
-            placeholder="Write or paste your research draft here. Use Markdown headings if you want a simple structure."
-            spellCheck className="block min-h-[58vh] w-full resize-y border-0 bg-white p-5 font-serif text-[14px] leading-[1.9] text-slate-700 outline-none placeholder:text-slate-300" aria-label="Draft content" />
+            placeholder="Write or paste your research draft here. Use the toolbar for headings, formatting, links, images and saved assets."
+            spellCheck className="block min-h-[58vh] w-full resize-y border-0 bg-white p-5 font-serif text-[14px] leading-[1.9] text-slate-700 outline-none placeholder:text-slate-300" aria-label="Draft content" />}
           <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-3 py-2 text-[9.5px] text-slate-400">
             <span>{stats.wordCount.toLocaleString()} words</span><span>·</span><span>{stats.sentenceCount.toLocaleString()} sentences</span><span>·</span><span>{stats.paragraphCount} paragraphs</span><span>·</span><span>{stats.readingMinutes < 1 ? '<1' : Math.round(stats.readingMinutes)} min read</span>
             <span className={`ml-auto ${autosavePending || saveStatus === 'saving' ? 'text-amber-500' : saveStatus === 'error' ? 'text-red-500' : 'text-emerald-500'}`}>
@@ -546,7 +828,7 @@ export default function WritingLab() {
             </span>
           </div>
         </> : <div className="grid min-h-[58vh] place-items-center p-6 text-center">
-          <div><div className="mx-auto grid h-11 w-11 place-items-center rounded-xl bg-blue-50 text-blue-500"><FileText size={20} /></div><h2 className="mt-3 text-sm font-extrabold text-slate-700">Start a draft</h2><p className="mt-1 max-w-sm text-[10px] leading-relaxed text-slate-500">Create a new plain-text draft. Everything stays in this browser and autosaves while you write.</p><Button className="mt-3" onClick={createDraft} icon={<Plus size={13} />}>New draft</Button></div>
+          <div><div className="mx-auto grid h-11 w-11 place-items-center rounded-xl bg-blue-50 text-blue-500"><FileText size={20} /></div><h2 className="mt-3 text-sm font-extrabold text-slate-700">Start or import a draft</h2><p className="mt-1 max-w-sm text-[10px] leading-relaxed text-slate-500">Create a new draft, import a .docx/.md/.txt file, or paste from Word or Google Docs. Everything stays in this browser.</p><div className="mt-3 flex flex-wrap justify-center gap-2"><Button onClick={() => void createDraft()} icon={<Plus size={13} />}>New draft</Button><Button variant="secondary" onClick={() => documentInputRef.current?.click()} icon={<FileUp size={13} />}>Import document</Button></div></div>
         </div>}
       </Card>
 
@@ -684,17 +966,75 @@ export default function WritingLab() {
         </Card>}
 
         <Card className="p-3.5">
-          <h2 className="text-xs font-extrabold text-slate-700">Export & safety</h2>
+          <h2 className="text-xs font-extrabold text-slate-700">Document tools</h2>
           <div className="mt-2 grid gap-1.5">
-            <Button size="sm" variant="secondary" onClick={() => exportDraft('txt')} disabled={!active} icon={<ArrowDownToLine size={12} />}>Plain text (.txt)</Button>
-            <Button size="sm" variant="secondary" onClick={() => exportDraft('md')} disabled={!active} icon={<ArrowDownToLine size={12} />}>Markdown (.md)</Button>
+            <Button size="sm" variant="secondary" onClick={() => documentInputRef.current?.click()} disabled={importBusy} icon={<FileUp size={12} />}>{importBusy ? 'Importing…' : 'Import .docx / .md / .txt'}</Button>
+            <Button size="sm" variant="secondary" onClick={() => setPasteOpen(true)} disabled={!active} icon={<ClipboardPaste size={12} />}>Paste from Word / Docs</Button>
+            <Button size="sm" variant="secondary" onClick={() => void exportDraft('docx')} disabled={!active || exportBusy} icon={<FileDown size={12} />}>Word file (.docx)</Button>
+            <Button size="sm" variant="secondary" onClick={() => void exportDraft('md')} disabled={!active || exportBusy} icon={<ArrowDownToLine size={12} />}>Markdown (.md)</Button>
+            <Button size="sm" variant="secondary" onClick={() => void exportDraft('txt')} disabled={!active || exportBusy} icon={<ArrowDownToLine size={12} />}>Plain text (.txt)</Button>
             <Button size="sm" variant="ghost" onClick={copyDraft} disabled={!active} icon={<Copy size={12} />}>Copy all text</Button>
           </div>
-          <p className="mt-2 text-[9px] leading-relaxed text-slate-400">Drafts autosave to IndexedDB and keep bounded version snapshots. Export regularly if browser site data may be cleared.</p>
+          <div className="mt-2 grid grid-cols-3 gap-1.5">
+            <Button size="sm" variant="ghost" onClick={() => imageInputRef.current?.click()} disabled={!active} title="Insert local image" icon={<ImagePlus size={12} />}>Image</Button>
+            <Button size="sm" variant="ghost" onClick={() => fileInputRef.current?.click()} disabled={!active} title="Attach local file" icon={<Paperclip size={12} />}>File</Button>
+            <Button size="sm" variant="ghost" onClick={() => setAssetOpen(true)} disabled={!active} title="Insert saved visual asset" icon={<ImageIcon size={12} />}>Assets</Button>
+          </div>
+          <Callout tone="info">Word and Google Docs are handled through exported files or clipboard paste. There is no Google Drive sign-in or live co-editing. Complex layouts such as track changes, footnotes, columns and equations may not survive the Markdown-based round trip.</Callout>
+          <p className="mt-2 text-[9px] leading-relaxed text-slate-400">Drafts and inserted assets autosave to IndexedDB and keep bounded version snapshots. Exports embed saved assets up to 8 MB each; export regularly if browser site data may be cleared.</p>
         </Card>
       </aside>
     </div>
+
+    <Modal open={linkOpen} onClose={() => setLinkOpen(false)} title="Insert link"
+      footer={<>
+        <Button variant="ghost" onClick={() => setLinkOpen(false)}>Cancel</Button>
+        <Button variant="primary" onClick={insertLink} icon={<Link2 size={12} />}>Insert link</Button>
+      </>}>
+      <p className="text-[11px] leading-relaxed text-slate-500">Use an http(s), mailto, relative path or a saved <code>asset://</code> link. JavaScript and HTML data URLs are rejected.</p>
+      <Field label="Display text" className="mt-3"><Input value={linkLabel} onChange={(event) => setLinkLabel(event.target.value)} placeholder="Link text or selected text" /></Field>
+      <Field label="Destination" className="mt-2"><Input value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://example.org/paper" spellCheck={false} /></Field>
+    </Modal>
+
+    <Modal open={pasteOpen} onClose={() => setPasteOpen(false)} title="Paste from Word or Google Docs" wide
+      footer={<>
+        <Button variant="ghost" onClick={() => setPasteOpen(false)}>Cancel</Button>
+        <Button variant="secondary" onClick={() => insertPasted('insert')} disabled={!pasteMarkdown.trim()} icon={<Plus size={12} />}>Insert at cursor</Button>
+        <Button variant="primary" onClick={() => insertPasted('replace')} disabled={!pasteMarkdown.trim()} icon={<ClipboardPaste size={12} />}>Replace draft</Button>
+      </>}>
+      <Callout tone="info">Click the box below and press Ctrl/Cmd+V. SciVeyra reads formatted clipboard HTML when available, converts it to reviewable Markdown, and never contacts Google or Microsoft.</Callout>
+      <div contentEditable suppressContentEditableWarning role="textbox" aria-label="Paste area" aria-multiline="true"
+        onPaste={pasteHtml}
+        className="mt-3 min-h-[100px] rounded-xl border border-dashed border-slate-300 bg-white/70 p-3 text-[12px] leading-relaxed text-slate-600 outline-none focus:border-blue-400" />
+      {pasteHint && <p className="mt-1.5 text-[10px] leading-relaxed text-emerald-700">{pasteHint}</p>}
+      <Field label="Converted draft text" hint="Edit this before inserting if Word or Docs added unwanted styling." className="mt-3">
+        <textarea value={pasteMarkdown} onChange={(event) => setPasteMarkdown(event.target.value)} rows={9}
+          className="w-full resize-y rounded-xl border border-slate-200 bg-white p-3 font-serif text-[12px] leading-relaxed text-slate-700 outline-none focus:border-blue-400"
+          placeholder="Pasted content appears here as Markdown…" aria-label="Converted draft text" />
+      </Field>
+    </Modal>
+
+    <Modal open={assetOpen} onClose={() => setAssetOpen(false)} title="Insert a saved SciVeyra asset" wide>
+      {assets.length ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {assets.map((asset) => <button key={asset.id} type="button" onClick={() => insertSavedAsset(asset)} className="rounded-lg border border-slate-200 p-2 text-left transition hover:border-blue-300 hover:bg-blue-50/40">
+          <div className="grid h-20 place-items-center overflow-hidden rounded bg-slate-50">
+            {asset.kind === 'file' ? <Paperclip size={22} className="text-slate-400" />
+              : <img src={assetPreviewSrc(asset)} alt="" className="max-h-20 max-w-full object-contain" />}
+          </div>
+          <div className="mt-1 truncate text-[10px] font-bold text-slate-700">{asset.name}</div>
+          <div className="text-[9px] text-slate-400">{asset.kind.toUpperCase()} · {asset.kind === 'file' ? 'link' : 'image'}</div>
+        </button>)}
+      </div> : <Callout tone="info">No saved assets yet. Export a graph from Graph Studio, trace in Vector Studio, or insert a local image above; it will appear here for reuse.</Callout>}
+      <p className="mt-2 text-[9px] leading-relaxed text-slate-400">Images and files are stored once in SciVeyra assets. Drafts keep a small reference, and exports embed the stored data when possible.</p>
+    </Modal>
   </div>
+}
+
+function assetPreviewSrc(asset: Asset) {
+  if (!asset.data) return ''
+  if (asset.data.startsWith('data:')) return asset.data
+  if (asset.kind === 'svg') return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(asset.data)))}`
+  return asset.data
 }
 
 function CheckRow({ label, value, good, neutral = false }: { label: string; value: string; good: boolean; neutral?: boolean }) {

@@ -207,6 +207,7 @@ export default function FigureComposer() {
   }
 
   const addAsset = (asset: Asset) => {
+    if (asset.kind === 'file') return
     let width = Math.min(figure.width * 0.45, 520)
     let height = Math.min(figure.height * 0.4, 360)
     if (asset.width && asset.height) {
@@ -221,7 +222,7 @@ export default function FigureComposer() {
       label: `(${String.fromCharCode(97 + (index % 26))})`,
       assetId: asset.id,
       src: asset.data,
-      kind: asset.kind,
+      kind: asset.kind === 'svg' ? 'svg' : 'image',
       x: Math.round(m + (index % 2) * (width + g)),
       y: Math.round(m + Math.floor(index / 2) * (height + g + 30)),
       width: Math.round(width),
@@ -634,8 +635,8 @@ export default function FigureComposer() {
     </div>
 
     <Modal open={assetOpen} onClose={() => setAssetOpen(false)} title="Add an asset panel" wide>
-      {assets.length ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {assets.map((asset) => <button key={asset.id} type="button" onClick={() => addAsset(asset)} className="rounded-lg border border-slate-200 p-2 text-left hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:hover:bg-slate-800">
+      {assets.filter((asset) => asset.kind !== 'file').length ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {assets.filter((asset) => asset.kind !== 'file').map((asset) => <button key={asset.id} type="button" onClick={() => addAsset(asset)} className="rounded-lg border border-slate-200 p-2 text-left hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:hover:bg-slate-800">
           <div className="grid h-24 place-items-center overflow-hidden rounded bg-slate-50 dark:bg-slate-900">
             <img src={asset.kind === 'svg' ? svgDataUrl(asset.data) : asset.data} alt="" className="max-h-24 max-w-full object-contain" />
           </div>

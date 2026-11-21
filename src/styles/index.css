@@ -47,6 +47,22 @@ a { color: inherit; text-decoration: none; }
 img, svg, canvas { max-width: 100%; }
 p { margin: 0; }
 
+/* Read-only Writing Lab preview: the HTML is generated from escaped Markdown tokens. */
+.markdown-preview > * + * { margin-top: 0.85rem; }
+.markdown-preview a { color: #2563eb; text-decoration: underline; }
+.markdown-preview img { display: block; max-height: 420px; margin: 0.75rem auto; border: 1px solid #e2e8f0; border-radius: 0.75rem; }
+.markdown-preview h1, .markdown-preview h2, .markdown-preview h3 { color: #0f172a; font-weight: 800; line-height: 1.3; }
+.markdown-preview h1 { font-size: 1.6rem; }
+.markdown-preview h2 { font-size: 1.3rem; }
+.markdown-preview h3 { font-size: 1.1rem; }
+.markdown-preview ul, .markdown-preview ol { margin-left: 1.4rem; list-style: revert; }
+.markdown-preview blockquote { border-left: 3px solid #93c5fd; padding-left: 0.9rem; color: #475569; font-style: italic; }
+.markdown-preview pre { overflow: auto; border-radius: 0.75rem; background: #f1f5f9; padding: 0.8rem; font-size: 12px; }
+.markdown-preview code { border-radius: 0.3rem; background: #f1f5f9; padding: 0.1rem 0.3rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.markdown-preview table { width: 100%; border-collapse: collapse; }
+.markdown-preview th, .markdown-preview td { border: 1px solid #e2e8f0; padding: 0.4rem 0.6rem; text-align: left; }
+.markdown-preview .missing-asset { color: #b45309; font-style: italic; }
+
 ::selection { background: #dbeafe; color: #1e3a8a; }
 
 :focus-visible {

@@ -112,11 +112,15 @@ export type Reference = {
   updatedAt: string
 }
 
+export type AssetKind = 'svg' | 'image' | 'file'
+
 export type Asset = {
   id: string
   name: string
-  kind: 'svg' | 'image'
+  kind: AssetKind
   data: string
+  mime?: string
+  size?: number
   width?: number
   height?: number
   createdAt: string
