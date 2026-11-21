@@ -22,6 +22,21 @@ export function qualityLabel(score) {
   return 'Needs work'
 }
 
+const REPORT_METRICS = [
+  ['wordCount', 'Words'], ['targetProgress', 'Target progress'],
+  ['sectionCount', 'Headings'], ['expectedSections', 'Expected sections'],
+  ['missingSections', 'Missing sections'], ['citationCount', 'Citation usages'],
+  ['unresolvedCitations', 'Unresolved citations'], ['figureCount', 'Figures'],
+  ['tableCount', 'Tables'], ['uncitedReferences', 'Uncited saved sources'],
+  ['supportedClaims', 'Supported claims'], ['staleClaims', 'Stale claims'],
+  ['longSentences', 'Long sentences'], ['flesch', 'Flesch reading ease']
+]
+
+const REPORT_GROUPS = [
+  ['fail', 'Needs attention'], ['warn', 'Review'],
+  ['pass', 'Passed'], ['neutral', 'Not applicable']
+]
+
 function statusFromValue(value, warnAt, failAt) {
   if (value >= failAt) return 'fail'
   if (value >= warnAt) return 'warn'
@@ -161,4 +176,83 @@ export function assessManuscript({
     },
     note: 'Heuristic checks only. Always verify scientific meaning and formatting yourself.'
   }
+}
+
+function reportCell(value) {
+  return String(value ?? '—').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+}
+
+function reportMetric(key, value) {
+  if (Array.isArray(value)) return value.length ? value.join(', ') : 'None'
+  if (value === '' || value === null || value === undefined) return '—'
+  if (typeof value === 'number' && !Number.isFinite(value)) return '—'
+  if (key === 'targetProgress') return `${value}%`
+  if (key === 'flesch') return String(Math.round(value))
+  return String(value)
+}
+
+function reportList(value) {
+  if (Array.isArray(value)) return [...new Set(value.map((item) => String(item).trim()).filter(Boolean))]
+  if (typeof value === 'string' && value.trim()) return [value.trim()]
+  return []
+}
+
+/**
+ * Build a portable Markdown report from an assessment. No clock, network or
+ * hidden state: the same assessment and options always produce the same report.
+ */
+export function buildQualityReport(result = {}, options = {}) {
+  const assessment = result && typeof result === 'object' ? result : {}
+  const checks = Array.isArray(assessment.checks) ? assessment.checks : []
+  const metrics = assessment.metrics && typeof assessment.metrics === 'object' ? assessment.metrics : {}
+  const score = Number.isFinite(assessment.score) ? assessment.score : 0
+  const grade = assessment.grade || qualityLabel(score)
+  const targetWords = Math.max(1, Number(options.targetWords) || 1000)
+  const unresolvedCitations = reportList(options.unresolvedCitations)
+  const unresolvedReferences = reportList(options.unresolvedReferences)
+
+  const lines = [
+    '# Manuscript quality report',
+    '',
+    `- **Draft:** ${reportCell(options.title || 'Untitled draft')}`,
+    `- **Template:** ${reportCell(options.template || 'Not set')}`,
+    `- **Citation style:** ${reportCell(options.style || 'APA 7')}`,
+    `- **Word target:** ${targetWords.toLocaleString()}`,
+    `- **Status:** ${reportCell(grade)} (${score}/100)`,
+    '',
+    '## Metrics',
+    '',
+    '| Metric | Value |',
+    '| --- | --- |',
+    ...REPORT_METRICS.map(([key, label]) => `| ${label} | ${reportCell(reportMetric(key, metrics[key]))} |`),
+    '',
+    '## Checks',
+    ''
+  ]
+
+  for (const [status, label] of REPORT_GROUPS) {
+    lines.push(`### ${label}`, '')
+    const groupChecks = checks.filter((check) => check && check.status === status)
+    if (!groupChecks.length) lines.push('None.', '')
+    else {
+      for (const check of groupChecks) {
+        lines.push(`- **${reportCell(check.label || check.id || 'Check')}** — ${reportCell(check.detail || '')}`)
+      }
+      lines.push('')
+    }
+  }
+
+  if (unresolvedCitations.length || unresolvedReferences.length) {
+    lines.push('## Unresolved tokens', '')
+    for (const key of unresolvedCitations) lines.push(`- Citation token: \`${key}\``)
+    for (const token of unresolvedReferences) lines.push(`- Figure/table reference: \`${token}\``)
+    lines.push('')
+  }
+
+  lines.push(
+    '## Scope',
+    '',
+    'Heuristic checks only. This report cannot verify scientific meaning, grammar or formatting. Generated locally; no data leaves this device.'
+  )
+  return lines.join('\n')
 }

@@ -1,6 +1,6 @@
 import { buildBibliography, citationAudit, parseCitations, renumberCitations } from '../src/lib/citationEngine.js'
 import { buildFigureBlock, buildTableBlock, numberDocument, scanNumberables } from '../src/lib/documentNumbering.js'
-import { CHECK_ORDER, assessManuscript, qualityLabel } from '../src/lib/manuscriptQuality.js'
+import { CHECK_ORDER, assessManuscript, buildQualityReport, qualityLabel } from '../src/lib/manuscriptQuality.js'
 
 const references = [
   {
@@ -150,5 +150,56 @@ describe('manuscript quality', () => {
     expect(qualityLabel(78)).toBe('Good')
     expect(qualityLabel(64)).toBe('Fair')
     expect(qualityLabel(30)).toBe('Needs work')
+  })
+})
+
+describe('quality report', () => {
+  const content = [
+    '# Study',
+    '',
+    '## Introduction',
+    '',
+    'We tested [@curie2020] with a short sentence.',
+    '',
+    '## References',
+    '',
+    '- Curie, M. (2020). Paper one.',
+    '',
+    '## TODO'
+  ].join('\n')
+
+  const options = {
+    title: 'Study one',
+    template: 'IMRaD',
+    style: 'APA 7',
+    targetWords: 10,
+    unresolvedCitations: ['missing2022'],
+    unresolvedReferences: ['@fig:old-plot']
+  }
+
+  it('builds a deterministic local Markdown report', () => {
+    const result = assessManuscript({ content, references, template: 'imrad', targetWords: 10 })
+    const first = buildQualityReport(result, options)
+    const second = buildQualityReport(result, options)
+    expect(first).toBe(second)
+    expect(first).toContain('# Manuscript quality report')
+    expect(first).toContain('- **Draft:** Study one')
+    expect(first).toContain('- **Template:** IMRaD')
+    expect(first).toContain('- **Status:**')
+    expect(first).toContain('| Words |')
+    expect(first).toContain('| Target progress |')
+    expect(first).toContain('### Needs attention')
+    expect(first).toContain('**Placeholders**')
+    expect(first).toContain('- Citation token: `missing2022`')
+    expect(first).toContain('- Figure/table reference: `@fig:old-plot`')
+    expect(first).toContain('Generated locally; no data leaves this device.')
+  })
+
+  it('reports empty drafts without inventing findings', () => {
+    const result = assessManuscript({ content: '', template: 'imrad' })
+    const report = buildQualityReport(result, { title: 'Empty' })
+    expect(report).toContain('- **Status:** Not started (0/100)')
+    expect(report).toContain('None.')
+    expect(report).not.toContain('Unresolved tokens')
   })
 })

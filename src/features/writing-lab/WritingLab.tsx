@@ -14,7 +14,7 @@ import { analyzeDraft } from '../../lib/writing.js'
 import { CITATION_STYLES, formatCitation, referenceKey } from '../../lib/references.js'
 import { buildBibliography, citationAudit, renumberCitations } from '../../lib/citationEngine.js'
 import { buildFigureBlock, buildTableBlock, numberDocument, stableKey } from '../../lib/documentNumbering.js'
-import { assessManuscript } from '../../lib/manuscriptQuality.js'
+import { assessManuscript, buildQualityReport } from '../../lib/manuscriptQuality.js'
 import { copyText, downloadBlob, downloadText, readFileAsDataURL, readFileAsText } from '../../lib/export.js'
 import {
   htmlToMarkdown, markdownToHtml, plainTextToMarkdown, sanitizeUrl, titleFromMarkdown
@@ -379,6 +379,20 @@ export default function WritingLab() {
       await copyText(prepareExportContent(active).content)
       notify('Resolved draft text copied with citations and figure/table numbers.', 'success')
     } catch { notify('Clipboard access failed.', 'error') }
+  }
+
+  const exportQualityReport = () => {
+    if (!active) return
+    const report = buildQualityReport(quality, {
+      title: active.title,
+      template: getTemplate(active.template || templateId)?.label || 'Not set',
+      style: citationStyle,
+      targetWords: targetNumber,
+      unresolvedCitations: citationAuditResult.unresolved,
+      unresolvedReferences: displayNumbering.unresolved
+    })
+    downloadText(report, `${draftFilename(active)}-quality.md`, 'text/markdown;charset=utf-8')
+    notify('Manuscript quality report exported as Markdown.', 'success')
   }
 
   const insertAtCursor = (insertText: string) => {
@@ -811,6 +825,20 @@ export default function WritingLab() {
         </Card>
 
         <Card className="p-3">
+          <details open>
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-extrabold text-slate-700">
+              <span aria-hidden="true" className="text-slate-400">▸</span>
+              <span className="flex items-center gap-1.5"><Sparkles size={13} className="text-blue-500" />Paper Finisher guide</span>
+            </summary>
+            <ol className="mt-2 space-y-1.5 text-[9px] leading-relaxed text-slate-500">
+              <li><span className="font-bold text-slate-700">1. Cite sources.</span> Insert a saved reference, then click <span className="font-semibold text-blue-600">Refresh bibliography</span>. Tokens like <code>[@curie2020]</code> stay editable in the draft.</li>
+              <li><span className="font-bold text-slate-700">2. Number visuals.</span> Insert a figure or table, then use <span className="font-semibold text-indigo-600">Cite</span> in the register to add <code>@fig:</code> or <code>@tbl:</code> references.</li>
+              <li><span className="font-bold text-slate-700">3. Finish the paper.</span> Check the quality panel, export a Markdown report, then copy or export the paper. Preview and exports resolve tokens; the stored draft keeps them.</li>
+            </ol>
+          </details>
+        </Card>
+
+        <Card className="p-3">
           <h2 className="text-xs font-extrabold text-slate-700">Word target</h2>
           <div className="mt-2 flex items-center gap-1.5"><Input type="number" min={1} value={target} onChange={(event) => setTarget(event.target.value)} aria-label="Word target" /><span className="text-[10px] text-slate-400">words</span></div>
           <ProgressBar value={Math.min(100, (stats.wordCount / targetNumber) * 100)} />
@@ -1069,7 +1097,10 @@ export default function WritingLab() {
         <Card className="p-3.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><ListChecks size={13} className="text-blue-500" />Manuscript quality</h2>
-            <Badge tone={quality.score >= 75 ? 'green' : quality.score >= 60 ? 'amber' : quality.score > 0 ? 'red' : 'slate'}>{quality.grade}</Badge>
+            <div className="flex items-center gap-1.5">
+              <Badge tone={quality.score >= 75 ? 'green' : quality.score >= 60 ? 'amber' : quality.score > 0 ? 'red' : 'slate'}>{quality.grade}</Badge>
+              <Button size="sm" variant="ghost" className="!h-6 !px-1.5 !text-[9px]" onClick={exportQualityReport} disabled={!active} icon={<FileDown size={11} />}>Report</Button>
+            </div>
           </div>
           <div className="mt-2 flex items-center gap-2">
             <ProgressBar value={quality.score} />
