@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
-  BookOpen, ChevronRight, Download, FileImage, FileText, FlaskConical, FolderOpen, Grid2X2, History, Home,
-  Image as ImageIcon, Layers, LineChart, Menu, Network, RefreshCw, Search, Settings, ShieldCheck,
+  BookOpen, ChevronRight, Compass, Download, FileImage, FileText, FlaskConical, FolderOpen, Grid2X2, History, Home,
+  Image as ImageIcon, Layers, LineChart, Mail, Menu, Network, RefreshCw, Search, Settings, ShieldCheck,
   WandSparkles, WifiOff, X
 } from 'lucide-react'
 import Logo from '../components/Logo'
 import { ToastStack } from '../components/ui'
+import { copyrightLine } from '../lib/siteMeta.js'
 import { useApp } from './AppContext'
 import { usePwaStatus } from './usePwaStatus'
 
 const groups: { title: string; items: { label: string; to: string; icon: typeof Home }[] }[] = [
-  { title: 'Workspace', items: [{ label: 'Home', to: '/home', icon: Home }, { label: 'Projects', to: '/projects', icon: FolderOpen }, { label: 'Version History', to: '/history', icon: History }, { label: 'Feature Tester', to: '/tester', icon: FlaskConical }] },
+  { title: 'Workspace', items: [{ label: 'Home', to: '/home', icon: Home }, { label: 'Projects', to: '/projects', icon: FolderOpen }, { label: 'Version History', to: '/history', icon: History }, { label: 'Feature Tester', to: '/tester', icon: FlaskConical }, { label: 'Contact Developer', to: '/contact', icon: Mail }] },
   { title: 'Data & graphs', items: [{ label: 'Graph Studio', to: '/graphs', icon: LineChart }, { label: '3D Graph Studio', to: '/three-d', icon: Layers }] },
   { title: 'Visual tools', items: [
     { label: 'Image Studio', to: '/images', icon: ImageIcon },
@@ -20,6 +21,7 @@ const groups: { title: string; items: { label: string; to: string; icon: typeof 
     { label: 'Diagram Studio', to: '/diagrams', icon: Network }
   ] },
   { title: 'Research', items: [
+    { label: 'Research Toolkit', to: '/toolkit', icon: Compass },
     { label: 'Reference Finder', to: '/navigator', icon: Search },
     { label: 'Reference Manager', to: '/references', icon: BookOpen },
     { label: 'Writing Lab', to: '/writing', icon: FileText },
@@ -42,6 +44,8 @@ const titles: Record<string, { title: string; section: string }> = {
   '/references': { title: 'Reference Manager', section: 'Research' },
   '/writing': { title: 'Writing Lab', section: 'Research' },
   '/rewriter': { title: 'Paragraph Rewriter', section: 'Research' },
+  '/toolkit': { title: 'Research Toolkit', section: 'Research' },
+  '/contact': { title: 'Contact Developer', section: 'Workspace' },
   '/settings': { title: 'Settings', section: 'Workspace' }
 }
 
@@ -76,10 +80,10 @@ export default function Shell() {
       ? { badge: 'bg-blue-100 text-blue-600', dot: 'bg-blue-400' }
       : { badge: 'bg-emerald-100 text-emerald-600', dot: 'bg-emerald-400' }
 
-  const navLinkClass = (isActive: boolean) => `group relative flex items-center gap-2.5 rounded-xl px-3 py-2 text-[12.5px] font-semibold transition-all duration-150 ${
+  const navLinkClass = (isActive: boolean) => `group relative flex items-center gap-2.5 rounded-xl px-3 py-2 text-[12.5px] font-semibold transition-all duration-200 ${
     isActive
-      ? 'bg-blue-50/90 text-blue-700 shadow-[inset_0_0_0_1px_rgba(191,219,254,.75)]'
-      : 'text-slate-600 hover:bg-slate-100/70 hover:text-slate-900'
+      ? 'bg-gradient-to-r from-blue-50/95 via-blue-50/80 to-indigo-50/60 text-blue-700 shadow-[inset_0_0_0_1px_rgba(191,219,254,.8),0_6px_16px_-10px_rgba(37,99,235,.5)]'
+      : 'text-slate-600 hover:bg-gradient-to-r hover:from-slate-100/80 hover:to-blue-50/50 hover:text-slate-900'
   }`
 
   const sidebar = <div className="flex h-full flex-col px-3.5 pb-3.5 pt-5">
@@ -156,9 +160,15 @@ export default function Shell() {
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="glass-chip hidden items-center gap-2 rounded-full border-slate-200 px-3 py-1.5 text-[9.5px] font-extrabold uppercase tracking-[0.14em] text-slate-500 md:flex">
+          <span className="glass-chip hidden items-center gap-2 rounded-full border-slate-200 px-3 py-1.5 text-[9.5px] font-extrabold uppercase tracking-[0.14em] text-slate-500 xl:flex">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_0_3px_rgba(52,211,153,.18)]" /> Local workspace
           </span>
+          <NavLink to="/toolkit" className="glass-chip hidden h-9 items-center gap-1.5 rounded-xl border-slate-200 px-3 text-[11px] font-bold text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 sm:inline-flex" title="Research Toolkit">
+            <Compass size={15} /> <span className="hidden md:inline">Toolkit</span>
+          </NavLink>
+          <NavLink to="/contact" className="glass-chip inline-flex h-9 w-9 items-center justify-center rounded-xl border-slate-200 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600" aria-label="Contact developer" title="Contact developer">
+            <Mail size={16} />
+          </NavLink>
           <NavLink to="/settings" className="glass-chip inline-flex h-9 w-9 items-center justify-center rounded-xl border-slate-200 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600" aria-label="Open settings" title="Settings">
             <Settings size={16} />
           </NavLink>
@@ -170,6 +180,17 @@ export default function Shell() {
           <Outlet />
         </div>
       </main>
+
+      <footer className="border-t border-slate-200/70 bg-white/60 backdrop-blur-sm">
+        <div className="mx-auto flex max-w-[1560px] flex-col items-center justify-between gap-2 px-4 py-4 text-[10.5px] text-slate-400 sm:flex-row md:px-7">
+          <p className="font-semibold text-slate-500">{copyrightLine()}</p>
+          <div className="flex flex-wrap items-center justify-center gap-4 font-bold">
+            <NavLink to="/toolkit" className="transition hover:text-blue-600">Toolkit</NavLink>
+            <NavLink to="/contact" className="transition hover:text-blue-600">Contact</NavLink>
+            <NavLink to="/settings" className="transition hover:text-blue-600">Privacy & backup</NavLink>
+          </div>
+        </div>
+      </footer>
     </div>
     <ToastStack />
   </div>

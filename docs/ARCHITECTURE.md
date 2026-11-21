@@ -43,6 +43,8 @@ Rules of thumb:
 | `/references` | `features/research/ReferenceManager` |
 | `/writing` | `features/writing-lab` |
 | `/rewriter` | `features/text-lab/ParagraphRewriter` |
+| `/toolkit` | `features/toolkit/ResearchToolkit` (native map, external directory, qualitative coder) |
+| `/contact` | `features/contact/Contact` |
 | `/tester` | `features/testing/FeatureTester` |
 | `/projects` | `features/projects` |
 | `/settings` | `features/settings` |
@@ -54,6 +56,9 @@ Unknown paths redirect to `/home`. Netlify rewrites all paths to `index.html` so
 - `src/lib/drafting.js` defines local outline templates, section parsing/guidance and claim helpers. It builds clean Markdown skeletons (prompts stay in the UI), tracks claims by draft offsets and exports a readable evidence map.
 - `src/lib/metadata.js` normalises OpenAlex, DOAJ, Europe PMC, Crossref, arXiv and Unpaywall payloads, deduplicates results and builds external patent/pattern links. Browser-incompatible providers fall back to same-origin `/api/*` rewrites defined in `netlify.toml` and `vite.config.ts`.
 - `src/lib/rewriter.js` performs deterministic local paragraph rewriting and optionally calls a user-supplied self-hosted Ollama endpoint. It protects numbers, units, DOIs, URLs and citation markers; no key or hosted service is involved.
+- `src/lib/toolDirectory.js` is the single source of truth for the research-tool map. `kind: 'native'` entries point to real routes; `kind: 'external'` entries point to provider websites and carry an access label so paid/proprietary services are never claimed as built in.
+- `src/lib/qualCoding.js` provides literal, case-insensitive code counts, context snippets and escaped CSV export for the Toolkit's session-only qualitative coder.
+- `src/lib/siteMeta.js` holds the exact developer name, public links and copyright line used by the landing page, shell footer and contact page.
 - `src/lib/featureTests.js` uses the same pure builders as the studios. `runFeatureTests` never throws for a failed check, so the Feature Tester can show a complete report.
 
 ## State and storage
@@ -65,6 +70,7 @@ Unknown paths redirect to `/home`. Netlify rewrites all paths to `index.html` so
 - `dbPut` adds `updatedAt`/`createdAt` when missing and saves a bounded "before" image to `versions` for user records. `listVersions`, `restoreVersion`, `deleteVersion` and `clearHistory` power the Version History page. Writing Lab also keeps an in-session undo/redo stack via `src/lib/history.js`.
 - `drafts` may carry a chosen outline `template` and an array of `claims`. Each claim stores its selected text, offsets, section heading and `referenceIds` that point into the `references` store; applying an outline clears old claims. Draft edits, including claim links, are autosaved, snapshotted and included in JSON backups.
 - `searchCache` is volatile derived data: it is excluded from backups, cleared with local data and not counted in Settings totals. Reference Finder stores pre-Unpaywall results there and labels cached/stale results in the UI.
+- The Toolkit qualitative coder intentionally uses React state only. It writes no IndexedDB store, appears in no backup and must be exported as CSV before leaving the page.
 - `exportBackup` and `importBackup` move durable collections (including version history) as JSON.
 - Graph records carry an optional `mode` of `'2d' | '3d'`. Graph Studio filters to `mode !== '3d'`; 3D Studio filters to `mode === '3d'`, so the two studios never show each other's saved scenes.
 - Older records without `mode` are treated as 2D.

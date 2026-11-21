@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ArrowRight, BookOpen, Database, FileImage, FileText, FlaskConical, FolderOpen, Grid2X2, HardDrive,
+  ArrowRight, BookOpen, Compass, Database, FileImage, FileText, FlaskConical, FolderOpen, Grid2X2, HardDrive,
   Image as ImageIcon, Layers, LineChart, Network, Search, ShieldCheck, Sparkles, WandSparkles
 } from 'lucide-react'
 import { Badge, Card, Spinner } from '../../components/ui'
@@ -16,7 +16,11 @@ const quickTools = [
   { title: 'Image Studio', desc: 'Crop, adjust and export images', to: '/images', icon: ImageIcon, tint: 'from-emerald-50 to-teal-50 text-emerald-600 ring-emerald-100' },
   { title: 'Vector Studio', desc: 'Trace raster art into SVG', to: '/vector', icon: FileImage, tint: 'from-cyan-50 to-sky-50 text-cyan-600 ring-cyan-100' },
   { title: 'Figure Composer', desc: 'Build multi-panel figures', to: '/figures', icon: Grid2X2, tint: 'from-orange-50 to-amber-50 text-orange-600 ring-orange-100' },
+  { title: 'Diagram Studio', desc: 'Map methods and study flows', to: '/diagrams', icon: Network, tint: 'from-cyan-50 to-sky-50 text-cyan-600 ring-cyan-100' },
+  { title: 'Research Toolkit', desc: 'Native equivalents and honest tool directory', to: '/toolkit', icon: Compass, tint: 'from-indigo-50 to-blue-50 text-indigo-600 ring-indigo-100' },
   { title: 'Reference Finder', desc: 'Search free open-access metadata', to: '/navigator', icon: Search, tint: 'from-pink-50 to-rose-50 text-pink-600 ring-pink-100' },
+  { title: 'Reference Manager', desc: 'BibTeX/RIS library and citations', to: '/references', icon: BookOpen, tint: 'from-amber-50 to-orange-50 text-amber-600 ring-amber-100' },
+  { title: 'Writing Lab', desc: 'Drafts, outlines and claim evidence', to: '/writing', icon: FileText, tint: 'from-emerald-50 to-teal-50 text-emerald-600 ring-emerald-100' },
   { title: 'Paragraph Rewriter', desc: 'Humanise prose without a paid AI API', to: '/rewriter', icon: WandSparkles, tint: 'from-violet-50 to-purple-50 text-violet-600 ring-violet-100' },
   { title: 'Feature Tester', desc: 'Run built-in checks across every tool', to: '/tester', icon: FlaskConical, tint: 'from-slate-50 to-blue-50 text-blue-600 ring-blue-100' }
 ]
@@ -104,6 +108,9 @@ export default function Home() {
             </Link>
             <Link to="/three-d" className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-[12.5px] font-bold text-slate-700 shadow-soft transition hover:-translate-y-0.5 hover:border-slate-300">
               <Layers size={15} className="text-violet-500" /> Explore 3D
+            </Link>
+            <Link to="/toolkit" className="inline-flex h-11 items-center gap-2 rounded-xl px-4 text-[12.5px] font-bold text-slate-600 transition hover:bg-white/70 hover:text-slate-900">
+              <Compass size={15} /> Toolkit
             </Link>
             <Link to="/references" className="inline-flex h-11 items-center gap-2 rounded-xl px-4 text-[12.5px] font-bold text-slate-600 transition hover:bg-white/70 hover:text-slate-900">
               <BookOpen size={15} /> Library

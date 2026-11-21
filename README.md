@@ -16,6 +16,8 @@ Everything runs in the browser. No account, backend, paid API or AI API is requi
 - **Reference Manager** — add, edit, filter and sort references; import/export BibTeX and RIS; deduplicate; copy formatted citations and in-text citations; resolve a DOI or title to metadata; add a reference from a PDF DOI.
 - **Writing Lab** — Markdown draft editor with outline templates and section guidance, a claim–evidence map linked to saved references, debounced autosave, undo/redo, word targets, citation-style-aware insertion, rule-based writing checks, selection-scoped inline rewrites with per-change accept/reject, and TXT/MD/evidence-map export.
 - **Paragraph Rewriter** — local deterministic humanising/rewriting with protected numbers, units, DOIs, URLs and citations. Optionally use a self-hosted Ollama endpoint/model you supply; no paid AI API or key is required.
+- **Research Toolkit** — an honest map of every major research tool category. Native cards open working SciVeyra features; external cards link to the real provider with **Open source / Free tier / Institutional / Proprietary** labels. Includes a local qualitative coder with literal code counts, context snippets and CSV export.
+- **Contact** — developer profile with portrait, exact LinkedIn/GitHub/email links and the project copyright notice.
 - **Feature Tester** — run 17 in-app checks across datasets, every 2D and 3D graph type, analysis, exports, references, rewriting and browser capabilities; export a JSON report.
 - **Projects** — browse every stored collection, search/filter/sort, open or delete items and inspect storage usage.
 - **Version History** — review bounded local snapshots created before edits and deletions, filter by collection, and restore a previous state without losing the current one.
@@ -24,7 +26,7 @@ Everything runs in the browser. No account, backend, paid API or AI API is requi
 
 ## Design
 
-SciVeyra uses one calm **light theme**. The `<html>` element never receives a `dark` class, so every page keeps a white canvas, soft slate borders and readable dark ink. Cards, headers, sidebars and controls share restrained white glass surfaces (`.glass-panel`, `.glass-subtle`, `.glass-chip`) with a subtle blue-tinted ambient wash. Manrope is used for display headings and DM Sans for body text.
+SciVeyra uses one calm **light theme**. The `<html>` element never receives a `dark` class, so every page keeps a white canvas, soft slate borders and readable dark ink. Cards, headers, sidebars and controls share restrained white glass surfaces (`.glass-panel`, `.glass-subtle`, `.glass-chip`) with a subtle blue-tinted ambient wash. The public landing page leans further into glass morphism with `.glass-hero` and `.glass-tile` frosted layers, soft colour orbs and a connected five-stage research story. Manrope is used for display headings and DM Sans for body text.
 
 Design tokens live in `tailwind.config.js`; shared primitives live in `src/components/ui.tsx`; glass effects are defined once in `src/styles/index.css`.
 
@@ -79,6 +81,8 @@ sciveyra-frontend/
 │   │   ├── research/          Multi-source Reference Finder and reference library
 │   │   ├── writing-lab/      Draft editor, outlines, claim map and citations
 │   │   ├── text-lab/         Local/Ollama paragraph rewriter
+│   │   ├── toolkit/          Native tool map, external directory and qualitative coder
+│   │   ├── contact/          Developer profile and public links
 │   │   ├── testing/          Built-in feature tester
 │   │   ├── home/             Dashboard
 │   │   ├── landing/          Public marketing page
@@ -107,7 +111,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/GRAPHING.md`](docs/GR
 
 ## Testing
 
-The suite covers parsing, statistics, curve fitting, references, multi-source discovery adapters, drafting templates, claim/evidence helpers, rewriting, the built-in test runner, storage, sample data, graph validation and figure building. Graph tests exercise every 2D type (`line`, `scatter`, `bar`, `area`, `histogram`, `box`, `errorbar`, `heatmap`, `contour`, `spectrum`) and every 3D type (`surface`, `mesh3d`, `scatter3d`), including error-bar alignment, fit labels, publication defaults and 3D contour/lighting/opacity controls.
+The suite covers parsing, statistics, curve fitting, references, multi-source discovery adapters, drafting templates, claim/evidence helpers, rewriting, the built-in test runner, storage, sample data, graph validation, figure building, tool-directory honesty, qualitative coding helpers and the exact public identity/links. Graph tests exercise every 2D type (`line`, `scatter`, `bar`, `area`, `histogram`, `box`, `errorbar`, `heatmap`, `contour`, `spectrum`) and every 3D type (`surface`, `mesh3d`, `scatter3d`), including error-bar alignment, fit labels, publication defaults and 3D contour/lighting/opacity controls.
 
 ```bash
 npm test
@@ -141,5 +145,11 @@ The app is a static single-page application. A ready-to-use Netlify configuratio
 - Curve fits use least-squares with numerical gradients; compare candidates by adjusted R² and treat outliers as flags, not errors.
 - Live figure panels require a local Plotly render; if a snapshot fails the placeholder box is kept and a warning is shown.
 - PDF DOI recovery only finds machine-readable DOIs (or one in the filename); scanned PDFs may need the DOI entered manually.
+- The Research Toolkit is a directory, not an integration. External tools are opened in their own tabs and their free tiers, subscriptions, data handling and availability are controlled by their providers.
+- The Qualitative Coder counts literal text and holds it in page memory only. Export the CSV before leaving; it is not a theme engine, sentiment tool or AI analyser.
+
+## Credits and copyright
+
+Copyright © 2026 Srinath Vatchavari Venkateshan. All rights reserved. The developer profile and public links are available at `/contact`.
 
 Check each dependency's licence and browser compatibility before public or commercial distribution.

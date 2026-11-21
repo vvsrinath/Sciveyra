@@ -15,6 +15,8 @@ const ResearchNavigator = lazy(() => import('../features/research/ResearchNaviga
 const ReferenceManager = lazy(() => import('../features/research/ReferenceManager'))
 const WritingLab = lazy(() => import('../features/writing-lab/WritingLab'))
 const ParagraphRewriter = lazy(() => import('../features/text-lab/ParagraphRewriter'))
+const ResearchToolkit = lazy(() => import('../features/toolkit/ResearchToolkit'))
+const Contact = lazy(() => import('../features/contact/Contact'))
 const FeatureTester = lazy(() => import('../features/testing/FeatureTester'))
 const Projects = lazy(() => import('../features/projects/Projects'))
 const VersionHistory = lazy(() => import('../features/history/VersionHistory'))
@@ -48,6 +50,8 @@ export default function App() {
         <Route path="/references" element={<ReferenceManager />} />
         <Route path="/writing" element={<WritingLab />} />
         <Route path="/rewriter" element={<ParagraphRewriter />} />
+        <Route path="/toolkit" element={<ResearchToolkit />} />
+        <Route path="/contact" element={<Contact />} />
         <Route path="/tester" element={<FeatureTester />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/history" element={<VersionHistory />} />
