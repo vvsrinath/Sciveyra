@@ -3,15 +3,18 @@ import type { ClipboardEvent as ReactClipboardEvent } from 'react'
 import {
   ArrowDownToLine, BookOpen, Bold, Check, ClipboardPaste, Code2, Copy, Eye, FileDown,
   FileText, FileUp, Heading2, Image as ImageIcon, ImagePlus, Italic, Link2, List,
-  ListOrdered, Map, Paperclip, Plus, Quote, Redo2, Save, ShieldCheck, Sparkles, Trash2,
-  TriangleAlert, Underline, Undo2, Upload, WandSparkles, X
+  ListChecks, ListOrdered, Map, Paperclip, Plus, Quote, Redo2, Save, ShieldCheck, Sparkles,
+  Table2, Trash2, TriangleAlert, Underline, Undo2, Upload, WandSparkles, X
 } from 'lucide-react'
 import { Badge, Button, Callout, Card, Field, Input, Modal, PageHeader, ProgressBar, Select, Spinner } from '../../components/ui'
 import { useApp } from '../../app/AppContext'
 import { useAutosave } from '../../app/useAutosave'
 import { dbDelete, dbGetAll, dbPut, getSetting, setSetting } from '../../lib/storage.js'
-import { analyzeDraft, readabilityLabel } from '../../lib/writing.js'
-import { inlineCitation, formatCitation, CITATION_STYLES } from '../../lib/references.js'
+import { analyzeDraft } from '../../lib/writing.js'
+import { CITATION_STYLES, formatCitation, referenceKey } from '../../lib/references.js'
+import { buildBibliography, citationAudit, renumberCitations } from '../../lib/citationEngine.js'
+import { buildFigureBlock, buildTableBlock, numberDocument, stableKey } from '../../lib/documentNumbering.js'
+import { assessManuscript } from '../../lib/manuscriptQuality.js'
 import { copyText, downloadBlob, downloadText, readFileAsDataURL, readFileAsText } from '../../lib/export.js'
 import {
   htmlToMarkdown, markdownToHtml, plainTextToMarkdown, sanitizeUrl, titleFromMarkdown
@@ -72,6 +75,9 @@ export default function WritingLab() {
   const [templateId, setTemplateId] = useState(DRAFT_TEMPLATES[0].id)
   const [citationId, setCitationId] = useState('')
   const [citationStyle, setCitationStyle] = useState('APA 7')
+  const [figureAssetId, setFigureAssetId] = useState('')
+  const [figureCaption, setFigureCaption] = useState('')
+  const [tableCaption, setTableCaption] = useState('')
   const [selection, setSelection] = useState<SelectionSpan | null>(null)
   const [rewriteEngine, setRewriteEngine] = useState<RewriteEngine>('local')
   const [rewritePreset, setRewritePreset] = useState('natural')
@@ -89,16 +95,39 @@ export default function WritingLab() {
   const rewriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   activeRef.current = active
 
+  const targetNumber = Math.max(1, Number(target) || 1000)
   const claims = useMemo<ClaimRecord[]>(() => active?.claims || [], [active?.claims])
   const sections = useMemo(() => parseSections(active?.content || ''), [active?.content])
   const visualAssets = useMemo(() => assets.filter((asset) => asset.kind === 'image' || asset.kind === 'svg'), [assets])
-  const previewHtml = useMemo(() => markdownToHtml(active?.content || '', {
+  const citationPreview = useMemo(
+    () => renumberCitations(active?.content || '', references, citationStyle),
+    [active?.content, references, citationStyle]
+  )
+  const displayNumbering = useMemo(
+    () => numberDocument(citationPreview.markdown, { assets }),
+    [citationPreview.markdown, assets]
+  )
+  const previewHtml = useMemo(() => markdownToHtml(displayNumbering.markdown, {
     resolveSource: (id: string) => assets.find((asset) => asset.id === id)?.data || ''
-  }), [active?.content, assets])
+  }), [displayNumbering.markdown, assets])
+  const citationAuditResult = useMemo(
+    () => citationAudit(active?.content || '', references, citationStyle),
+    [active?.content, references, citationStyle]
+  )
+  const quality = useMemo(() => assessManuscript({
+    content: active?.content || '',
+    references,
+    assets,
+    claims,
+    template: active?.template || templateId,
+    style: citationStyle,
+    targetWords: targetNumber
+  }), [active?.content, active?.template, references, assets, claims, templateId, citationStyle, targetNumber])
   const claimSummary = useMemo(
     () => summarizeClaims(claims, active?.content || '', references),
     [claims, active?.content, references]
   )
+  const stats = useMemo(() => analyzeDraft(active?.content || ''), [active?.content])
 
   useEffect(() => {
     let cancelled = false
@@ -263,27 +292,39 @@ export default function WritingLab() {
 
   const draftFilename = (draft: DraftRecord) => (draft.title || 'draft').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-|-$/g, '') || 'draft'
 
+  const prepareExportContent = (draft: DraftRecord) => {
+    const citations = renumberCitations(draft.content, references, citationStyle)
+    const numbered = numberDocument(citations.markdown, { assets })
+    const audit = citationAudit(draft.content, references, citationStyle)
+    const warnings = [
+      ...audit.unresolved.map((key: string) => `Unresolved citation key: [@${key}].`),
+      ...numbered.unresolved.map((token: string) => `Unresolved figure/table reference: ${token}.`)
+    ]
+    return { content: numbered.markdown, warnings }
+  }
+
   const exportDraft = async (format: 'txt' | 'md' | 'docx') => {
     const draft = activeRef.current
     if (!draft || exportBusy) return
     setExportBusy(true)
     try {
       const base = draftFilename(draft)
+      const prepared = prepareExportContent(draft)
       if (format === 'docx') {
-        const result = await buildDocxBlob(draft.content, { title: draft.title, assets })
+        const result = await buildDocxBlob(prepared.content, { title: draft.title, assets })
         downloadBlob(result.blob, `${base}.docx`)
-        reportWarnings(result.warnings)
-        notify('Draft exported as Word .docx with headings, formatting, links and images.', 'success')
+        reportWarnings([...prepared.warnings, ...result.warnings])
+        notify('Draft exported as Word .docx with resolved citations, numbered figures/tables, headings and images.', 'success')
       } else if (format === 'md') {
-        const result = markdownExport(draft.content, assets)
+        const result = markdownExport(prepared.content, assets)
         downloadText(result.text, `${base}.md`, 'text/markdown;charset=utf-8')
-        reportWarnings(result.warnings)
-        notify('Draft exported as Markdown with saved assets embedded.', 'success')
+        reportWarnings([...prepared.warnings, ...result.warnings])
+        notify('Draft exported as Markdown with resolved citations, numbered figures/tables and saved assets embedded.', 'success')
       } else {
-        const result = textExport(draft.content, assets)
+        const result = textExport(prepared.content, assets)
         downloadText(result.text, `${base}.txt`, 'text/plain;charset=utf-8')
-        reportWarnings(result.warnings)
-        notify('Draft exported as plain text.', 'success')
+        reportWarnings([...prepared.warnings, ...result.warnings])
+        notify('Draft exported as plain text with resolved citations and figure/table numbers.', 'success')
       }
     } catch (error) {
       notify(error instanceof Error ? error.message : `The ${format.toUpperCase()} export failed.`, 'error')
@@ -334,7 +375,10 @@ export default function WritingLab() {
 
   const copyDraft = async () => {
     if (!active) return
-    try { await copyText(active.content); notify('Draft text copied.', 'success') } catch { notify('Clipboard access failed.', 'error') }
+    try {
+      await copyText(prepareExportContent(active).content)
+      notify('Resolved draft text copied with citations and figure/table numbers.', 'success')
+    } catch { notify('Clipboard access failed.', 'error') }
   }
 
   const insertAtCursor = (insertText: string) => {
@@ -350,6 +394,8 @@ export default function WritingLab() {
       textarea.setSelectionRange(start + insertText.length, start + insertText.length)
     }, 0)
   }
+
+  const insertBlock = (block: string) => insertAtCursor(`\n\n${block.trim()}\n\n`)
 
   const wrapSelection = (before: string, after: string, placeholder: string) => {
     const draft = activeRef.current
@@ -431,8 +477,8 @@ export default function WritingLab() {
       const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name)
       if (!/^image\//.test(file.type) && !isSvg) { notify('Choose a PNG, JPEG, GIF, WebP or SVG image.', 'warning'); return }
       const asset = await saveLocalAsset(file, isSvg ? 'svg' : 'image')
-      insertAtCursor(`![${asset.name.replace(/[[\]]/g, '')}](asset://${asset.id})`)
-      notify('Image saved to SciVeyra assets and inserted. It will be embedded in exported files.', 'success')
+      insertBlock(buildFigureBlock(asset, asset.name))
+      notify('Image saved to SciVeyra assets and inserted as a numbered figure.', 'success')
     } catch (error) {
       notify(error instanceof Error ? error.message : 'The image could not be inserted.', 'error')
     } finally {
@@ -456,10 +502,11 @@ export default function WritingLab() {
   const insertSavedAsset = (asset: Asset) => {
     const label = asset.name.replace(/[[\]]/g, '')
     const isVisual = asset.kind === 'image' || asset.kind === 'svg'
-    insertAtCursor(isVisual ? `![${label}](asset://${asset.id})` : `[${label}](asset://${asset.id})`)
+    if (isVisual) insertBlock(buildFigureBlock(asset, label))
+    else insertAtCursor(`[${label}](asset://${asset.id})`)
     setAssetOpen(false)
     notify(isVisual
-      ? 'Saved visual asset inserted. Export embeds the current stored image.'
+      ? 'Saved visual inserted as a numbered figure. Export embeds the current stored image.'
       : 'Saved file inserted as a link.', 'success')
   }
 
@@ -497,25 +544,59 @@ export default function WritingLab() {
   const insertCitation = () => {
     const reference = references.find((item) => item.id === citationId)
     if (!reference || !active) { notify('Save a reference first, then insert a citation.', 'warning'); return }
-    const index = references.findIndex((item) => item.id === reference.id) + 1
-    insertAtCursor(inlineCitation(reference, index, citationStyle))
-    notify(`In-text citation inserted (${citationStyle}). Check the rendered reference list before submission.`, 'info')
+    insertAtCursor(`[@${referenceKey(reference)}]`)
+    notify(`Stable citation token inserted. Preview and exports render it as ${citationStyle} in first-use order.`, 'info')
   }
 
   const insertReferenceEntry = () => {
     const reference = references.find((item) => item.id === citationId)
     if (!reference || !active) { notify('Save a reference first, then insert a bibliography entry.', 'warning'); return }
-    const index = references.findIndex((item) => item.id === reference.id) + 1
-    insertAtCursor(formatCitation(reference, citationStyle, index))
+    const audit = citationAudit(active.content, references, citationStyle)
+    const usage = audit.usages.find((item: { referenceId: string | null }) => item.referenceId === reference.id)
+    const index = usage?.index || audit.usageCount + 1
+    insertAtCursor(`\n- ${formatCitation(reference, citationStyle, index)}`)
     notify(`Bibliography entry inserted (${citationStyle}).`, 'success')
   }
 
   const insertBibliography = () => {
     if (!active) return
     if (!references.length) { notify('Add references first to build a bibliography.', 'warning'); return }
-    const entries = references.map((reference, index) => formatCitation(reference, citationStyle, index + 1))
-    insertAtCursor(`\n\nReferences (${citationStyle})\n${entries.map((entry) => `- ${entry}`).join('\n')}`)
-    notify(`Bibliography with ${references.length} reference(s) inserted.`, 'success')
+    const result = buildBibliography(active.content, references, citationStyle)
+    applyEdit('citations', { content: result.markdown })
+    if (result.unresolved.length) {
+      notify(`Bibliography refreshed. Unresolved citation key(s): ${result.unresolved.join(', ')}.`, 'warning')
+      return
+    }
+    notify(`Bibliography built from ${result.entries.length} cited reference(s) in ${citationStyle}.`, 'success')
+  }
+
+  const insertNumberedFigure = () => {
+    if (!active) return
+    const asset = visualAssets.find((item) => item.id === figureAssetId) || visualAssets[0]
+    if (!asset) { notify('Insert or export a visual asset first, then add a numbered figure.', 'warning'); return }
+    insertBlock(buildFigureBlock(asset, figureCaption.trim() || asset.name))
+    setFigureCaption('')
+    notify('Numbered figure inserted. Cross-references update automatically in preview and exports.', 'success')
+  }
+
+  const insertNumberedTable = () => {
+    if (!active) return
+    const usedKeys = new Set(displayNumbering.items.map((item: { kind: string; key: string }) => `${item.kind === 'figure' ? 'fig' : 'tbl'}:${item.key}`.toLowerCase()))
+    const tableCount = displayNumbering.items.filter((item: { kind: string }) => item.kind === 'table').length
+    const base = stableKey(tableCaption.trim() || `table-${tableCount + 1}`, 'table')
+    let key = base
+    let suffix = 2
+    while (usedKeys.has(`tbl:${key}`)) { key = `${base}-${suffix}`; suffix += 1 }
+    insertBlock(buildTableBlock([['Metric', 'Value'], ['n', '']], tableCaption.trim() || 'Results summary', key))
+    setTableCaption('')
+    notify('Numbered table inserted. Insert a cross-reference from the register to cite it.', 'success')
+  }
+
+  const insertCrossReference = (item: { kind: string; key: string; label: string }) => {
+    if (!active) return
+    const token = item.kind === 'figure' ? `fig:${item.key}` : `tbl:${item.key}`
+    insertAtCursor(`@${token}`)
+    notify(`${item.label} cross-reference inserted; it resolves in preview and exports.`, 'info')
   }
 
   const captureSelection = (): SelectionSpan | null => {
@@ -691,15 +772,13 @@ export default function WritingLab() {
     setDecisions({})
   }
 
-  const stats = useMemo(() => analyzeDraft(active?.content || ''), [active?.content])
   const changeSummary = useMemo(() => suggestion ? summarizeChanges(suggestion.original, suggestion.rewritten) : null, [suggestion])
-  const targetNumber = Math.max(1, Number(target) || 1000)
   const longSentenceList = stats.longSentences.slice(0, 4)
 
   if (loading) return <div className="grid min-h-[60vh] place-items-center"><Spinner label="Opening Writing Lab…" /></div>
 
   return <div>
-    <PageHeader eyebrow="WRITING / 01" title="Writing Lab" description="Draft a complete paper with outlines, Word/Google Docs import and export, links, images, saved visual assets, citation tools, a claim–evidence map and reviewable local rewrites."
+    <PageHeader eyebrow="WRITING / 01" title="Writing Lab" description="Draft a complete paper with outlines, Word/Google Docs import and export, stable citations, numbered figures and tables, cross-references, a claim–evidence map, deterministic quality checks and reviewable local rewrites."
       actions={<>
         <Button variant="ghost" onClick={undo} disabled={!canUndo(editStack)} icon={<Undo2 size={14} />} title="Undo (Ctrl/Cmd+Z)">Undo</Button>
         <Button variant="ghost" onClick={redo} disabled={!canRedo(editStack)} icon={<Redo2 size={14} />} title="Redo (Ctrl/Cmd+Shift+Z)">Redo</Button>
@@ -764,15 +843,40 @@ export default function WritingLab() {
         </Card>
 
         <Card className="p-3">
-          <h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><BookOpen size={13} className="text-blue-500" />Insert citation</h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><BookOpen size={13} className="text-blue-500" />Citations & bibliography</h2>
+            <Badge tone="blue">{citationStyle}</Badge>
+          </div>
           {references.length ? <>
-            <Field label="Saved reference" className="mt-1"><Select value={citationId} onChange={(event) => setCitationId(event.target.value)}>{references.map((reference) => <option key={reference.id} value={reference.id}>{reference.title.slice(0, 70)}</option>)}</Select></Field>
+            <Field label="Saved reference" className="mt-2"><Select value={citationId} onChange={(event) => setCitationId(event.target.value)}>{references.map((reference) => <option key={reference.id} value={reference.id}>{reference.title.slice(0, 70)}</option>)}</Select></Field>
             <Field label="Citation style" className="mt-1.5"><Select value={citationStyle} onChange={(event) => setCitationStyle(event.target.value)}>{CITATION_STYLES.map((item) => <option key={item}>{item}</option>)}</Select></Field>
-            <Button size="sm" className="mt-1.5 w-full" onClick={insertCitation} icon={<Plus size={12} />}>Insert in-text citation</Button>
-            <Button size="sm" variant="secondary" className="mt-1.5 w-full" onClick={insertReferenceEntry} icon={<Plus size={12} />}>Insert bibliography entry</Button>
-            <Button size="sm" variant="ghost" className="mt-1.5 w-full" onClick={insertBibliography} icon={<BookOpen size={12} />}>Insert full bibliography ({references.length})</Button>
-            <p className="mt-1.5 text-[9px] leading-relaxed text-slate-400">Citations are inserted at the cursor in {citationStyle} form. Always proofread the rendered reference list before submission.</p>
+            <Button size="sm" className="mt-1.5 w-full" onClick={insertCitation} disabled={!active || preview} icon={<Plus size={12} />}>Insert in-text citation</Button>
+            <Button size="sm" variant="secondary" className="mt-1.5 w-full" onClick={insertReferenceEntry} disabled={!active || preview} icon={<Plus size={12} />}>Insert bibliography entry</Button>
+            <Button size="sm" variant="ghost" className="mt-1.5 w-full" onClick={insertBibliography} disabled={!active || preview} icon={<BookOpen size={12} />}>Refresh bibliography</Button>
+            <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50/70 p-2">
+              <div className="flex flex-wrap gap-1">
+                <Badge tone="green">{citationAuditResult.citedIds.length} cited</Badge>
+                <Badge tone="slate">{citationAuditResult.uncitedIds.length} uncited</Badge>
+                {citationAuditResult.unresolved.length > 0 && <Badge tone="red">{citationAuditResult.unresolved.length} unresolved</Badge>}
+              </div>
+              {citationAuditResult.unresolved.length > 0 && <p className="mt-1.5 break-words text-[9px] leading-relaxed text-red-600">Missing keys: {citationAuditResult.unresolved.join(', ')}</p>}
+              <p className="mt-1.5 text-[9px] leading-relaxed text-slate-400">Tokens stay in the draft; preview, copy and exports render them in first-use order.</p>
+            </div>
           </> : <p className="mt-1 text-[10px] leading-relaxed text-slate-400">No saved references. Search public metadata or import BibTeX/RIS first.</p>}
+        </Card>
+
+        <Card className="p-3">
+          <h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><Table2 size={13} className="text-indigo-500" />Figures & tables</h2>
+          {visualAssets.length ? <Field label="Saved figure" className="mt-2">
+            <Select value={figureAssetId || visualAssets[0].id} onChange={(event) => setFigureAssetId(event.target.value)} className="!h-8 !text-[10px]">
+              {visualAssets.map((asset) => <option key={asset.id} value={asset.id}>{asset.name.slice(0, 60)}</option>)}
+            </Select>
+          </Field> : <p className="mt-1.5 text-[9px] leading-relaxed text-slate-400">Insert a local image or export one from Graph Studio, then return here to number it.</p>}
+          <Field label="Figure caption" className="mt-1.5"><Input value={figureCaption} onChange={(event) => setFigureCaption(event.target.value)} placeholder="Short descriptive caption" className="!h-8 !text-[10px]" /></Field>
+          <Button size="sm" className="mt-1.5 w-full" onClick={insertNumberedFigure} disabled={!active || preview || !visualAssets.length} icon={<ImagePlus size={12} />}>Insert numbered figure</Button>
+          <Field label="Table caption" className="mt-2"><Input value={tableCaption} onChange={(event) => setTableCaption(event.target.value)} placeholder="e.g. Summary of results" className="!h-8 !text-[10px]" /></Field>
+          <Button size="sm" variant="secondary" className="mt-1.5 w-full" onClick={insertNumberedTable} disabled={!active || preview} icon={<Table2 size={12} />}>Insert numbered table</Button>
+          <p className="mt-1.5 text-[9px] leading-relaxed text-slate-400">Numbers and cross-references are resolved for preview, copy and exports. The stored draft keeps editable <code>@fig:</code> and <code>@tbl:</code> tokens.</p>
         </Card>
       </aside>
 
@@ -822,7 +926,7 @@ export default function WritingLab() {
             placeholder="Write or paste your research draft here. Use the toolbar for headings, formatting, links, images and saved assets."
             spellCheck className="block min-h-[58vh] w-full resize-y border-0 bg-white p-5 font-serif text-[14px] leading-[1.9] text-slate-700 outline-none placeholder:text-slate-300" aria-label="Draft content" />}
           <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-3 py-2 text-[9.5px] text-slate-400">
-            <span>{stats.wordCount.toLocaleString()} words</span><span>·</span><span>{stats.sentenceCount.toLocaleString()} sentences</span><span>·</span><span>{stats.paragraphCount} paragraphs</span><span>·</span><span>{stats.readingMinutes < 1 ? '<1' : Math.round(stats.readingMinutes)} min read</span>
+            <span>{stats.wordCount.toLocaleString()} words</span><span>·</span><span>{stats.sentenceCount.toLocaleString()} sentences</span><span>·</span><span>{stats.paragraphCount} paragraphs</span><span>·</span><span>{stats.readingMinutes < 1 ? '<1' : Math.round(stats.readingMinutes)} min read</span><span>·</span><span>quality {quality.score}</span>
             <span className={`ml-auto ${autosavePending || saveStatus === 'saving' ? 'text-amber-500' : saveStatus === 'error' ? 'text-red-500' : 'text-emerald-500'}`}>
               {saveStatus === 'error' ? 'Save failed — retry' : autosavePending || saveStatus === 'saving' ? 'Autosaving…' : 'Saved locally'}
             </span>
@@ -943,19 +1047,38 @@ export default function WritingLab() {
         </Card>
 
         <Card className="p-3.5">
-          <div className="flex items-center justify-between"><h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><Sparkles size={13} className="text-blue-500" />Writing checks</h2><Badge tone="blue">rule-based</Badge></div>
-          <div className="mt-2 space-y-1.5">
-            <CheckRow label="Readability" value={stats.flesch === null ? '—' : `${Math.round(stats.flesch)} · ${readabilityLabel(stats.flesch)}`} good={stats.flesch === null || stats.flesch >= 50} />
-            <CheckRow label="Avg. sentence" value={`${stats.averageSentenceLength.toFixed(1)} words`} good={stats.averageSentenceLength > 0 && stats.averageSentenceLength <= 25} />
-            <CheckRow label="Long sentences" value={longSentenceList.length ? `${stats.longSentences.length} over 30 words` : 'No long sentences'} good={!stats.longSentences.length} />
-            <CheckRow label="Repeated terms" value={stats.repeated.length ? stats.repeated.map(([word, count]: [string, number]) => `${word} (${count})`).join(', ') : 'None above threshold'} good={!stats.repeated.length} />
-            <CheckRow label="Filler phrases" value={stats.fillers.length ? stats.fillers.map((entry: { phrase: string; count: number }) => `${entry.phrase} (${entry.count})`).join(', ') : 'None detected'} good={!stats.fillers.length} />
-            <CheckRow label="Possible passive voice" value={stats.passiveCount ? `${stats.passiveCount} phrase(s); review in context` : 'No simple patterns found'} good={!stats.passiveCount} />
-            <CheckRow label="In-text citations" value={`${stats.citationCount} author–year pattern(s)`} good={stats.citationCount > 0} neutral={!stats.wordCount} />
-            <CheckRow label="Markdown headings" value={stats.headingCount ? `${stats.headingCount} heading(s)` : 'None'} good={stats.headingCount > 0} neutral={!stats.wordCount} />
-            <CheckRow label="Claim evidence" value={claimSummary.total ? `${claimSummary.supported}/${claimSummary.total} supported${claimSummary.stale ? ` · ${claimSummary.stale} stale` : ''}` : 'No claims tracked'} good={claimSummary.total > 0 && claimSummary.supported === claimSummary.total && claimSummary.stale === 0} neutral={claimSummary.total === 0} />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><Table2 size={13} className="text-indigo-500" />Figure & table register</h2>
+            <div className="flex flex-wrap gap-1">
+              <Badge tone="blue">{quality.metrics.figureCount} figures</Badge>
+              <Badge tone="slate">{quality.metrics.tableCount} tables</Badge>
+            </div>
           </div>
-          <Callout tone="warning">These heuristics can produce false positives. They are not a grammar checker and cannot reliably detect AI-generated text.</Callout>
+          {displayNumbering.items.length ? <div className="mt-2 max-h-40 space-y-1.5 overflow-auto pr-1">
+            {displayNumbering.items.map((item: { kind: string; key: string; label: string; caption: string }) => <div key={`${item.kind}-${item.key}`} className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50/70 p-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-[10px] font-bold text-slate-700">{item.label}</div>
+                <div className="break-words text-[9px] leading-relaxed text-slate-400">{item.caption}</div>
+              </div>
+              <Button size="sm" variant="ghost" className="!h-6 !px-1.5 !text-[9px]" onClick={() => insertCrossReference(item)} disabled={!active || preview} title={`Insert cross-reference to ${item.label}`}>Cite</Button>
+            </div>)}
+          </div> : <p className="mt-2 text-[10px] leading-relaxed text-slate-400">No numbered figures or tables yet. Insert one from the left panel or add a Markdown image/table.</p>}
+          {displayNumbering.unresolved.length > 0 && <p className="mt-2 break-words text-[9px] leading-relaxed text-red-600">Unresolved: {displayNumbering.unresolved.join(', ')}</p>}
+        </Card>
+
+        <Card className="p-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700"><ListChecks size={13} className="text-blue-500" />Manuscript quality</h2>
+            <Badge tone={quality.score >= 75 ? 'green' : quality.score >= 60 ? 'amber' : quality.score > 0 ? 'red' : 'slate'}>{quality.grade}</Badge>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <ProgressBar value={quality.score} />
+            <span className="shrink-0 text-[11px] font-extrabold text-slate-600">{quality.score}</span>
+          </div>
+          <div className="mt-2 max-h-[42vh] space-y-1.5 overflow-auto pr-1">
+            {quality.checks.map((check: { id: string; label: string; detail: string; status: string }) => <CheckRow key={check.id} label={check.label} value={check.detail} status={check.status} />)}
+          </div>
+          <Callout tone="warning">{quality.note}</Callout>
         </Card>
 
         {longSentenceList.length > 0 && <Card className="p-3.5">
@@ -1037,9 +1160,11 @@ function assetPreviewSrc(asset: Asset) {
   return asset.data
 }
 
-function CheckRow({ label, value, good, neutral = false }: { label: string; value: string; good: boolean; neutral?: boolean }) {
+function CheckRow({ label, value, status }: { label: string; value: string; status: string }) {
+  const tone = status === 'pass' ? 'text-emerald-500' : status === 'warn' ? 'text-amber-500' : status === 'fail' ? 'text-red-500' : 'text-slate-300'
+  const Icon = status === 'neutral' ? FileText : status === 'pass' ? Check : TriangleAlert
   return <div className="flex gap-2 border-b border-slate-100 py-1.5 last:border-0">
-    <span className={`mt-0.5 shrink-0 ${neutral ? 'text-slate-300' : good ? 'text-emerald-500' : 'text-amber-500'}`}>{neutral ? <FileText size={11} /> : good ? <Check size={11} /> : <TriangleAlert size={11} />}</span>
+    <span className={`mt-0.5 shrink-0 ${tone}`}><Icon size={11} /></span>
     <div className="min-w-0"><div className="text-[10px] font-bold text-slate-600">{label}</div><div className="break-words text-[9px] leading-relaxed text-slate-400">{value}</div></div>
   </div>
 }
