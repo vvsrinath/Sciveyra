@@ -37,6 +37,13 @@ describe('document import normalization', () => {
     expect(markdown).not.toContain('alert(')
   })
 
+  it('keeps boundary spaces outside adjacent Word formatting runs', () => {
+    expect(htmlToMarkdown('<p><strong>The method was </strong><em>repeatable.</em></p>'))
+      .toBe('**The method was** *repeatable.*')
+    expect(plainTextToMarkdown('\uFEFF## Existing heading\nText'))
+      .toBe('## Existing heading\nText')
+  })
+
   it('drops unsafe destinations and preserves pasted line structure', () => {
     expect(sanitizeUrl('javascript:alert(1)')).toBe('')
     expect(sanitizeUrl('data:text/html;base64,AAAA')).toBe('')

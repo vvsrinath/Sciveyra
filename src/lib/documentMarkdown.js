@@ -43,6 +43,15 @@ function inlineFromChildren(node) {
   return [...(node?.childNodes || [])].map(inlineNode).join('').replace(/[ \t]{2,}/g, ' ').trim()
 }
 
+/** Keep boundary whitespace outside formatting markers so adjacent Word runs stay separated. */
+function wrapFormatted(children, before, after = before, transform = (value) => value) {
+  const value = String(children ?? '')
+  const leading = value.match(/^\s*/)?.[0] || ''
+  const trailing = value.match(/\s*$/)?.[0] || ''
+  const core = transform(value.slice(leading.length, value.length - trailing.length))
+  return core ? `${leading}${before}${core}${after}${trailing}` : value
+}
+
 function inlineNode(node) {
   if (node.nodeType === 3) return cleanTextNode(node.nodeValue)
   if (node.nodeType !== 1) return ''
@@ -67,13 +76,13 @@ function inlineNode(node) {
     const label = children.replace(/\s+/g, ' ').trim() || href
     return href ? `[${label}](${href})` : label
   }
-  if (tag === 'code' || tag === 'kbd') return children.trim() ? `\`${children.trim().replace(/`/g, "'")}\`` : ''
-  if (tag === 'strong' || tag === 'b' || bold) return children.trim() ? `**${children.trim()}**` : ''
-  if (tag === 'em' || tag === 'i' || italic) return children.trim() ? `*${children.trim()}*` : ''
-  if (tag === 'u' || underline) return children.trim() ? `<u>${children.trim()}</u>` : ''
-  if (tag === 's' || tag === 'strike' || tag === 'del') return children.trim() ? `~~${children.trim()}~~` : ''
-  if (tag === 'sup') return children.trim() ? `<sup>${children.trim()}</sup>` : ''
-  if (tag === 'sub') return children.trim() ? `<sub>${children.trim()}</sub>` : ''
+  if (tag === 'code' || tag === 'kbd') return wrapFormatted(children, '`', '`', (value) => value.replace(/`/g, "'"))
+  if (tag === 'strong' || tag === 'b' || bold) return wrapFormatted(children, '**')
+  if (tag === 'em' || tag === 'i' || italic) return wrapFormatted(children, '*')
+  if (tag === 'u' || underline) return wrapFormatted(children, '<u>', '</u>')
+  if (tag === 's' || tag === 'strike' || tag === 'del') return wrapFormatted(children, '~~')
+  if (tag === 'sup') return wrapFormatted(children, '<sup>', '</sup>')
+  if (tag === 'sub') return wrapFormatted(children, '<sub>', '</sub>')
   return children
 }
 
@@ -198,7 +207,7 @@ export function htmlToMarkdown(html) {
 
 /** Plain text becomes paragraphs with hard line breaks; existing Markdown is preserved. */
 export function plainTextToMarkdown(text) {
-  const value = normalizeLineEndings(text).trim()
+  const value = normalizeLineEndings(text).replace(/^\uFEFF/, '').trim()
   if (!value) return ''
   if (/^\s{0,3}#{1,6}\s/m.test(value) || /^\s*[-*+]\s/m.test(value) || /^\s*\d+[.)]\s/m.test(value)
     || /\[[^\]]+\]\([^)]+\)/.test(value) || /!\[[^\]]*\]\([^)]+\)/.test(value)) return value
